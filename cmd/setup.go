@@ -92,8 +92,9 @@ var setupCmd = &cobra.Command{
 		ioutil.WriteFile(filepath.Join(rootDir, "config.json"), configData, 0644)
 
 		fmt.Printf("****************************************************\n")
-		fmt.Printf("Authorization token: %s\n", token)
-		fmt.Printf("         Public key: %s", public.String())
+		fmt.Printf("          Armory URL: %s\n", "")
+		fmt.Printf(" Authorization token: %s\n", token)
+		fmt.Printf("          Public key: %s", public.String())
 		fmt.Printf("****************************************************\n")
 	},
 }

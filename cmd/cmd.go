@@ -40,12 +40,18 @@ const (
 )
 
 func init() {
-	rootCmd.PersistentFlags().BoolP(disableAuthFlagStr, "A", false, "Disable authentication token checks")
-	rootCmd.PersistentFlags().StringP(configFlagStr, "c", "", "Config file path")
-	rootCmd.PersistentFlags().StringP(lhostFlagStr, "l", "", "Listen host")
-	rootCmd.PersistentFlags().Uint16P(lportFlagStr, "p", 8888, "Listen port")
-	rootCmd.PersistentFlags().StringP(readTimeoutFlagStr, "r", "1m", "HTTP read timeout")
-	rootCmd.PersistentFlags().StringP(writeTimeoutFlagStr, "w", "1m", "HTTP write timeout")
+	rootCmd.Flags().BoolP(disableAuthFlagStr, "A", false, "Disable authentication token checks")
+	rootCmd.Flags().StringP(configFlagStr, "c", "", "Config file path")
+	rootCmd.Flags().StringP(lhostFlagStr, "l", "", "Listen host")
+	rootCmd.Flags().Uint16P(lportFlagStr, "p", 8888, "Listen port")
+	rootCmd.Flags().StringP(readTimeoutFlagStr, "r", "1m", "HTTP read timeout")
+	rootCmd.Flags().StringP(writeTimeoutFlagStr, "w", "1m", "HTTP write timeout")
+
+	rootCmd.AddCommand(setupCmd)
+	rootCmd.AddCommand(refreshCmd)
+	rootCmd.AddCommand(addCmd)
+	rootCmd.AddCommand(rmCmd)
+	rootCmd.AddCommand(lsCmd)
 }
 
 var rootCmd = &cobra.Command{

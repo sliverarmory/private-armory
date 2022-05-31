@@ -57,9 +57,8 @@ func getServerConfig(cmd *cobra.Command) *api.ArmoryServerConfig {
 		return nil
 	}
 	if !disableAuth && serverConfig.AuthorizationTokenDigest == "" {
-		token, tokenDigest := randomAuthorizationToken()
-		fmt.Printf("[*] Authorization token: %s\n", token)
-		serverConfig.AuthorizationTokenDigest = tokenDigest
+		fmt.Printf("Error cannot have blank authorization token, use --%s\n", disableAuthFlagStr)
+		return nil
 	}
 
 	if cmd.Flags().Changed(lhostFlagStr) {
@@ -92,6 +91,5 @@ func randomAuthorizationToken() (string, string) {
 		panic(err)
 	}
 	hexToken := fmt.Sprintf("%x", buf)
-	digest := sha256.Sum256([]byte(hexToken))
-	return hexToken, fmt.Sprintf("%x", digest)
+	return hexToken, fmt.Sprintf("%x", sha256.Sum256([]byte(hexToken)))
 }
