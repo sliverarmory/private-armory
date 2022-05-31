@@ -44,13 +44,27 @@ type ArmoryServerConfig struct {
 	ListenHost string `json:"lhost"`
 	ListenPort uint16 `json:"lport"`
 
-	ExtensionsDir string `json:"extensions_dir"`
-	AliasesDir    string `json:"aliases_dir"`
+	RootDir    string `json:"root_dir"`
+	PublicKey  string `json:"public_key"`
+	PrivateKey string `json:"private_key"`
 
 	AuthorizationTokenDigest string `json:"authorization_token_digest"`
 
 	WriteTimeout time.Duration `json:"write_timeout"`
 	ReadTimeout  time.Duration `json:"read_timeout"`
+}
+
+type ArmoryEntry struct {
+	Name        string `json:"name"`
+	CommandName string `json:"command_name"`
+	RepoURL     string `json:"repo_url"`
+	PublicKey   string `json:"public_key"`
+}
+
+// ArmoryBundle - A bundle of packages
+type ArmoryBundle struct {
+	Name     string   `json:"name"`
+	Packages []string `json:"packages"`
 }
 
 // JSONError - Return an error in JSON format
@@ -67,7 +81,7 @@ func New(config *ArmoryServerConfig) *ArmoryServer {
 	router := mux.NewRouter()
 
 	// Public Handlers
-	router.HandleFunc("/health", server.HealthHandler)
+	router.HandleFunc("/health", server.healthHandler)
 
 	// Handlers
 	armoryRouter := router.PathPrefix("/armory").Subrouter()
@@ -160,8 +174,8 @@ func (s *ArmoryServer) loggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// HealthHandler - Simple health check
-func (s *ArmoryServer) HealthHandler(resp http.ResponseWriter, req *http.Request) {
+// healthHandler - Simple health check
+func (s *ArmoryServer) healthHandler(resp http.ResponseWriter, req *http.Request) {
 	resp.Header().Set("Content-Type", "application/json")
 	resp.WriteHeader(http.StatusOK)
 	resp.Write([]byte(`{"health": "ok"}`))

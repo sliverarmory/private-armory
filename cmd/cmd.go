@@ -29,22 +29,23 @@ import (
 )
 
 const (
-	lhostFlagStr       = "lhost"
-	lportFlagStr       = "lport"
-	configFlagStr      = "config"
-	timeoutFlagStr     = "timeout"
-	disableAuthFlagStr = "no-authentication"
+	lhostFlagStr        = "lhost"
+	lportFlagStr        = "lport"
+	configFlagStr       = "config"
+	writeTimeoutFlagStr = "write-timeout"
+	readTimeoutFlagStr  = "read-timeout"
+	disableAuthFlagStr  = "disable-authentication"
 
-	extensionsDirFlagStr = "extensions-dir"
-	aliasesDirFlagStr    = "aliases-dir"
+	rootDirFlagStr = "root-dir"
 )
 
 func init() {
 	rootCmd.PersistentFlags().BoolP(disableAuthFlagStr, "A", false, "Disable authentication token checks")
 	rootCmd.PersistentFlags().StringP(configFlagStr, "c", "", "Config file path")
-	rootCmd.PersistentFlags().StringP(lhostFlagStr, "b", "", "Listen host")
+	rootCmd.PersistentFlags().StringP(lhostFlagStr, "l", "", "Listen host")
 	rootCmd.PersistentFlags().Uint16P(lportFlagStr, "p", 8888, "Listen port")
-	rootCmd.PersistentFlags().IntP(timeoutFlagStr, "t", 30, "API timeout")
+	rootCmd.PersistentFlags().StringP(readTimeoutFlagStr, "r", "1m", "HTTP read timeout")
+	rootCmd.PersistentFlags().StringP(writeTimeoutFlagStr, "w", "1m", "HTTP write timeout")
 }
 
 var rootCmd = &cobra.Command{
@@ -75,7 +76,7 @@ func startServer(cmd *cobra.Command, args []string) {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)
 	<-sig
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	server.HTTPServer.Shutdown(ctx)
 	os.Exit(0)
