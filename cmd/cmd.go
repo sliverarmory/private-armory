@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/sliverarmory/external-armory/api"
+	"github.com/sliverarmory/external-armory/log"
 	"github.com/spf13/cobra"
 )
 
@@ -40,8 +41,9 @@ const (
 )
 
 func init() {
+	rootCmd.PersistentFlags().StringP(configFlagStr, "c", "", "Config file path")
+
 	rootCmd.Flags().BoolP(disableAuthFlagStr, "A", false, "Disable authentication token checks")
-	rootCmd.Flags().StringP(configFlagStr, "c", "", "Config file path")
 	rootCmd.Flags().StringP(lhostFlagStr, "l", "", "Listen host")
 	rootCmd.Flags().Uint16P(lportFlagStr, "p", 8888, "Listen port")
 	rootCmd.Flags().StringP(readTimeoutFlagStr, "r", "1m", "HTTP read timeout")
@@ -70,7 +72,10 @@ func startServer(cmd *cobra.Command, args []string) {
 	}
 
 	// Start server
-	server := api.New(serverConfig)
+	server := api.New(serverConfig,
+		log.GetAppLogger(serverConfig.RootDir),
+		log.GetAccessLogger(serverConfig.RootDir),
+	)
 	go func() {
 		err := server.HTTPServer.ListenAndServe()
 		if err != nil {

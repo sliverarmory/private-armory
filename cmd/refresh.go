@@ -18,13 +18,106 @@ package cmd
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-import "github.com/spf13/cobra"
+import (
+	"encoding/json"
+	"io/ioutil"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/sliverarmory/external-armory/api"
+	"github.com/spf13/cobra"
+)
 
 var refreshCmd = &cobra.Command{
 	Use:   "refresh",
 	Short: "Refresh the armory index",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
-
+		serverConfig := getServerConfig(cmd)
+		if serverConfig == nil {
+			return
+		}
+		generateArmoryIndex(serverConfig.RootDir)
 	},
+}
+
+// GenerateArmoryIndex - Generate the armory index
+func generateArmoryIndex(rootDir string) error {
+	aliases, err := getAliases(rootDir)
+	if err != nil {
+		return err
+	}
+	extensions, err := getExtensions(rootDir)
+	if err != nil {
+		return err
+	}
+	bundles, err := getBundles(rootDir)
+	if err != nil {
+		return err
+	}
+
+	armoryIndex := &api.ArmoryIndex{
+		Aliases:    aliases,
+		Extensions: extensions,
+		Bundles:    bundles,
+	}
+
+	_, err = json.MarshalIndent(armoryIndex, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func getAliases(rootDir string) ([]*api.ArmoryEntry, error) {
+	aliasesPath := filepath.Join(rootDir, aliasesDirName)
+	if _, err := os.Stat(aliasesPath); os.IsNotExist(err) {
+		return nil, err
+	}
+	fi, err := ioutil.ReadDir(aliasesPath)
+	if err != nil {
+		return nil, err
+	}
+
+	entries := []*api.ArmoryEntry{}
+	for _, entry := range fi {
+		if entry.IsDir() {
+			continue
+		}
+		if !strings.HasSuffix(entry.Name(), ".tar.gz") {
+			continue
+		}
+	}
+
+	return entries, nil
+}
+
+func getExtensions(rootDir string) ([]*api.ArmoryEntry, error) {
+	extensionsPath := filepath.Join(rootDir, extensionsDirName)
+	if _, err := os.Stat(extensionsPath); os.IsNotExist(err) {
+		return nil, err
+	}
+	fi, err := ioutil.ReadDir(extensionsPath)
+	if err != nil {
+		return nil, err
+	}
+
+	entries := []*api.ArmoryEntry{}
+	for _, entry := range fi {
+		if entry.IsDir() {
+			continue
+		}
+		if !strings.HasSuffix(entry.Name(), ".tar.gz") {
+			continue
+		}
+	}
+
+	return entries, nil
+}
+
+func getBundles(rootDir string) ([]*api.ArmoryBundle, error) {
+
+	return nil, nil
 }

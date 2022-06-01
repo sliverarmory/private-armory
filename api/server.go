@@ -54,6 +54,14 @@ type ArmoryServerConfig struct {
 	ReadTimeout  time.Duration `json:"read_timeout"`
 }
 
+// ArmoryIndex - Root index, must be signed by server private key
+type ArmoryIndex struct {
+	Aliases    []*ArmoryEntry  `json:"aliases"`
+	Extensions []*ArmoryEntry  `json:"extensions"`
+	Bundles    []*ArmoryBundle `json:"bundles"`
+}
+
+// ArmoryEntry - An alias or extension entry
 type ArmoryEntry struct {
 	Name        string `json:"name"`
 	CommandName string `json:"command_name"`
@@ -72,18 +80,20 @@ type JSONError struct {
 	Error string `json:"error"`
 }
 
-func New(config *ArmoryServerConfig) *ArmoryServer {
+// New - Create a new server instance with given configuration and loggers
+func New(config *ArmoryServerConfig, app *logrus.Logger, access *logrus.Logger) *ArmoryServer {
 	server := &ArmoryServer{
 		ArmoryServerConfig: config,
-		AccessLog:          logrus.New(),
-		AppLog:             logrus.New(),
+		AccessLog:          access,
+		AppLog:             app,
 	}
 	router := mux.NewRouter()
+	router.Use(server.defaultHeadersMiddleware)
 
 	// Public Handlers
 	router.HandleFunc("/health", server.healthHandler)
 
-	// Handlers
+	// Armory Handlers
 	armoryRouter := router.PathPrefix("/armory").Subrouter()
 	armoryRouter.Use(server.loggingMiddleware)
 	if server.ArmoryServerConfig.AuthorizationTokenDigest != "" {
@@ -125,7 +135,7 @@ func (s *ArmoryServer) IndexHandler(resp http.ResponseWriter, req *http.Request)
 
 // AliasesHandler
 func (s *ArmoryServer) AliasesHandler(resp http.ResponseWriter, req *http.Request) {
-	resp.Header().Set("Content-Type", "application/json")
+	resp.Header().Set("Content-Type", "application/octet-stream")
 	data, err := json.Marshal("{}")
 	if err != nil {
 		s.jsonError(resp, err)
@@ -137,7 +147,7 @@ func (s *ArmoryServer) AliasesHandler(resp http.ResponseWriter, req *http.Reques
 
 // ExtensionsHandler
 func (s *ArmoryServer) ExtensionsHandler(resp http.ResponseWriter, req *http.Request) {
-	resp.Header().Set("Content-Type", "application/json")
+	resp.Header().Set("Content-Type", "application/octet-stream")
 	data, err := json.Marshal("{}")
 	if err != nil {
 		s.jsonError(resp, err)
@@ -159,6 +169,14 @@ func (s *ArmoryServer) authorizationTokenMiddleware(next http.Handler) http.Hand
 		} else {
 			s.jsonForbidden(resp, errors.New("user is not authenticated"))
 		}
+	})
+}
+
+func (s *ArmoryServer) defaultHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) {
+		resp.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none';")
+		resp.Header().Set("X-Frame-Options", "deny")
+		next.ServeHTTP(resp, req)
 	})
 }
 

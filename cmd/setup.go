@@ -34,6 +34,12 @@ import (
 
 const (
 	armoryRootDirName = "armory-root"
+
+	extensionsDirName = "extensions"
+	aliasesDirName    = "aliases"
+	bundlesFileName   = "bundles.json"
+
+	configFileName = "config.json"
 )
 
 var setupCmd = &cobra.Command{
@@ -58,15 +64,15 @@ var setupCmd = &cobra.Command{
 					fmt.Printf("Error failed to create '%s' %s\n", rootDir, err)
 					return
 				}
-				os.Mkdir(filepath.Join(rootDir, "extensions"), 0755)
-				os.Mkdir(filepath.Join(rootDir, "aliases"), 0755)
-				ioutil.WriteFile(filepath.Join(rootDir, "bundles.json"), []byte(`{}`), 0644)
+				os.Mkdir(filepath.Join(rootDir, extensionsDirName), 0755)
+				os.Mkdir(filepath.Join(rootDir, aliasesDirName), 0755)
+				ioutil.WriteFile(filepath.Join(rootDir, bundlesFileName), []byte(`[]`), 0644)
 			} else {
 				return
 			}
 		}
 
-		fmt.Printf("Generating default configuration: %s\n", filepath.Join(rootDir, "config.json"))
+		fmt.Printf("Generating default configuration: %s\n", filepath.Join(rootDir, configFileName))
 		public, private, err := minisign.GenerateKey(rand.Reader)
 		if err != nil {
 			fmt.Printf("Failed to generate public/private key(s): %s\n", err)
