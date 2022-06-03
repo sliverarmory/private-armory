@@ -1,6 +1,6 @@
 # External Armory
 
-A reference implementation for self-hosted private (or 3rd party public) Sliver armories.
+An Armory implementation for self-hosted private Sliver armories.
 
 ### Setup
 

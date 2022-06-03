@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/sliverarmory/external-armory/api"
+	"github.com/sliverarmory/external-armory/log"
 	"github.com/spf13/cobra"
 )
 
@@ -56,14 +57,11 @@ func generateArmoryIndex(rootDir string) error {
 	if err != nil {
 		return err
 	}
-
-	armoryIndex := &api.ArmoryIndex{
+	_, err = json.MarshalIndent(&api.ArmoryIndex{
 		Aliases:    aliases,
 		Extensions: extensions,
 		Bundles:    bundles,
-	}
-
-	_, err = json.MarshalIndent(armoryIndex, "", "  ")
+	}, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -72,21 +70,27 @@ func generateArmoryIndex(rootDir string) error {
 }
 
 func getAliases(rootDir string) ([]*api.ArmoryEntry, error) {
+	appLog := log.GetAppLogger(rootDir)
 	aliasesPath := filepath.Join(rootDir, aliasesDirName)
+	appLog.Infof("Looking for aliases in %s", aliasesPath)
 	if _, err := os.Stat(aliasesPath); os.IsNotExist(err) {
+		appLog.Errorf("Failed to find aliases: %s", err)
 		return nil, err
 	}
 	fi, err := ioutil.ReadDir(aliasesPath)
 	if err != nil {
+		appLog.Errorf("Failed to find aliases: %s", err)
 		return nil, err
 	}
 
 	entries := []*api.ArmoryEntry{}
 	for _, entry := range fi {
 		if entry.IsDir() {
+			appLog.Debugf("%v is a directory (skip)", entry)
 			continue
 		}
 		if !strings.HasSuffix(entry.Name(), ".tar.gz") {
+			appLog.Debugf("%v not a .tar.gz file (skip)", entry)
 			continue
 		}
 	}
@@ -95,21 +99,27 @@ func getAliases(rootDir string) ([]*api.ArmoryEntry, error) {
 }
 
 func getExtensions(rootDir string) ([]*api.ArmoryEntry, error) {
+	appLog := log.GetAppLogger(rootDir)
 	extensionsPath := filepath.Join(rootDir, extensionsDirName)
+	appLog.Infof("Looking for extensions in %s", extensionsPath)
 	if _, err := os.Stat(extensionsPath); os.IsNotExist(err) {
+		appLog.Errorf("Failed to find extensions: %s", err)
 		return nil, err
 	}
 	fi, err := ioutil.ReadDir(extensionsPath)
 	if err != nil {
+		appLog.Errorf("Failed to find extensions: %s", err)
 		return nil, err
 	}
 
 	entries := []*api.ArmoryEntry{}
 	for _, entry := range fi {
 		if entry.IsDir() {
+			appLog.Debugf("%v is a directory (skip)", entry)
 			continue
 		}
 		if !strings.HasSuffix(entry.Name(), ".tar.gz") {
+			appLog.Debugf("%v not a .tar.gz file (skip)", entry)
 			continue
 		}
 	}

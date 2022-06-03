@@ -51,9 +51,6 @@ func init() {
 
 	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(refreshCmd)
-	rootCmd.AddCommand(addCmd)
-	rootCmd.AddCommand(rmCmd)
-	rootCmd.AddCommand(lsCmd)
 }
 
 var rootCmd = &cobra.Command{
@@ -61,36 +58,30 @@ var rootCmd = &cobra.Command{
 	Short: "Sliver armory server",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
-		startServer(cmd, args)
-	},
-}
-
-func startServer(cmd *cobra.Command, args []string) {
-	serverConfig := getServerConfig(cmd)
-	if serverConfig == nil {
-		return
-	}
-
-	// Start server
-	server := api.New(serverConfig,
-		log.GetAppLogger(serverConfig.RootDir),
-		log.GetAccessLogger(serverConfig.RootDir),
-	)
-	go func() {
-		err := server.HTTPServer.ListenAndServe()
-		if err != nil {
-			os.Exit(1)
+		serverConfig := getServerConfig(cmd)
+		if serverConfig == nil {
+			return
 		}
-	}()
+		server := api.New(serverConfig,
+			log.GetAppLogger(serverConfig.RootDir),
+			log.GetAccessLogger(serverConfig.RootDir),
+		)
+		go func() {
+			err := server.HTTPServer.ListenAndServe()
+			if err != nil {
+				os.Exit(1)
+			}
+		}()
 
-	// Wait for signal to stop
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt)
-	<-sig
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	server.HTTPServer.Shutdown(ctx)
-	os.Exit(0)
+		// Wait for signal to stop
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, os.Interrupt)
+		<-sig
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		server.HTTPServer.Shutdown(ctx)
+		os.Exit(0)
+	},
 }
 
 // Execute - Execute the root command

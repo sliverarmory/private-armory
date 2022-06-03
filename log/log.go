@@ -26,10 +26,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-var (
-	txtFile *os.File
-)
-
 // GetAppLogger - Returns the root logger
 func GetAppLogger(rootDir string) *logrus.Logger {
 	txtLogger := logrus.New()
@@ -39,7 +35,7 @@ func GetAppLogger(rootDir string) *logrus.Logger {
 	}
 	txtFilePath := path.Join(rootDir, "app.log")
 	var err error
-	txtFile, err = os.OpenFile(txtFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
+	txtFile, err := os.OpenFile(txtFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to open log file %v", err))
 	}
@@ -57,7 +53,7 @@ func GetAccessLogger(rootDir string) *logrus.Logger {
 	}
 	txtFilePath := path.Join(rootDir, "access.log")
 	var err error
-	txtFile, err = os.OpenFile(txtFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
+	txtFile, err := os.OpenFile(txtFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to open log file %v", err))
 	}

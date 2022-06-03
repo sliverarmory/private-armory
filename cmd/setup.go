@@ -33,7 +33,7 @@ import (
 )
 
 const (
-	armoryRootDirName = "armory-root"
+	armoryRootDirName = "armory-data"
 
 	extensionsDirName = "extensions"
 	aliasesDirName    = "aliases"
@@ -95,7 +95,7 @@ var setupCmd = &cobra.Command{
 			PublicKey:                public.String(),
 			PrivateKey:               string(encryptedPrivateKey),
 		}, "", "  ")
-		ioutil.WriteFile(filepath.Join(rootDir, "config.json"), configData, 0644)
+		ioutil.WriteFile(filepath.Join(rootDir, configFileName), configData, 0644)
 
 		fmt.Printf("****************************************************\n")
 		fmt.Printf("          Armory URL: %s\n", "")

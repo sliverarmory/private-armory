@@ -41,6 +41,7 @@ type ArmoryServer struct {
 
 // ArmoryServerConfig - Configuration options for the Armory server
 type ArmoryServerConfig struct {
+	DomainName string `json:"domain_name"`
 	ListenHost string `json:"lhost"`
 	ListenPort uint16 `json:"lport"`
 
