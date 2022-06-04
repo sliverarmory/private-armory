@@ -39,7 +39,8 @@ const (
 	aliasesDirName    = "aliases"
 	bundlesFileName   = "bundles.json"
 
-	configFileName = "config.json"
+	configFileName     = "config.json"
+	privateKeyFileName = "private.key"
 )
 
 var setupCmd = &cobra.Command{
@@ -84,16 +85,14 @@ var setupCmd = &cobra.Command{
 			fmt.Printf("Failed to encrypt private key: %s\n", err)
 			return
 		}
-
+		ioutil.WriteFile(filepath.Join(rootDir, privateKeyFileName), encryptedPrivateKey, 0644)
 		token, tokenDigest := randomAuthorizationToken()
-
 		configData, _ := json.MarshalIndent(&api.ArmoryServerConfig{
 			ListenHost:               "",
 			ListenPort:               8888,
 			RootDir:                  rootDir,
 			AuthorizationTokenDigest: tokenDigest,
 			PublicKey:                public.String(),
-			PrivateKey:               string(encryptedPrivateKey),
 		}, "", "  ")
 		ioutil.WriteFile(filepath.Join(rootDir, configFileName), configData, 0644)
 

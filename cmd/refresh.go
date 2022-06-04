@@ -25,9 +25,14 @@ import (
 	"path/filepath"
 	"strings"
 
+	"aead.dev/minisign"
 	"github.com/sliverarmory/external-armory/api"
 	"github.com/sliverarmory/external-armory/log"
 	"github.com/spf13/cobra"
+)
+
+const (
+	armoryIndexFileName = "armory-index.json"
 )
 
 var refreshCmd = &cobra.Command{
@@ -39,34 +44,57 @@ var refreshCmd = &cobra.Command{
 		if serverConfig == nil {
 			return
 		}
-		generateArmoryIndex(serverConfig.RootDir)
+
+		appLog := log.GetAppLogger(serverConfig.RootDir)
+		index, err := generateArmoryIndex(serverConfig.RootDir)
+		if err != nil {
+			appLog.Errorf("Failed to generate armory index: %s", err)
+			return
+		}
+		data, err := json.MarshalIndent(index, "", "  ")
+		if err != nil {
+			appLog.Errorf("Failed to marshal armory index: %s", err)
+			return
+		}
+		err = ioutil.WriteFile(filepath.Join(serverConfig.RootDir, armoryIndexFileName), data, 0644)
+		if err != nil {
+			appLog.Errorf("Failed to write armory index: %s", err)
+			return
+		}
+		password := userPassword()
+		privateKey, err := minisign.PrivateKeyFromFile(password, filepath.Join(serverConfig.RootDir, privateKeyFileName))
+		if err != nil {
+			appLog.Errorf("Failed to load private key: %s", err)
+			return
+		}
+		sig := minisign.Sign(privateKey, data)
+		err = ioutil.WriteFile(filepath.Join(serverConfig.RootDir, armoryIndexFileName+".minisig"), sig, 0644)
+		if err != nil {
+			appLog.Errorf("Failed to write armory index signature: %s", err)
+			return
+		}
 	},
 }
 
 // GenerateArmoryIndex - Generate the armory index
-func generateArmoryIndex(rootDir string) error {
+func generateArmoryIndex(rootDir string) (*api.ArmoryIndex, error) {
 	aliases, err := getAliases(rootDir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	extensions, err := getExtensions(rootDir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	bundles, err := getBundles(rootDir)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	_, err = json.MarshalIndent(&api.ArmoryIndex{
+	return &api.ArmoryIndex{
 		Aliases:    aliases,
 		Extensions: extensions,
 		Bundles:    bundles,
-	}, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return nil
+	}, nil
 }
 
 func getAliases(rootDir string) ([]*api.ArmoryEntry, error) {
@@ -128,6 +156,11 @@ func getExtensions(rootDir string) ([]*api.ArmoryEntry, error) {
 }
 
 func getBundles(rootDir string) ([]*api.ArmoryBundle, error) {
-
-	return nil, nil
+	bundleData, err := ioutil.ReadFile(filepath.Join(rootDir, bundlesFileName))
+	if err != nil {
+		return nil, err
+	}
+	bundles := []*api.ArmoryBundle{}
+	err = json.Unmarshal(bundleData, &bundles)
+	return bundles, err
 }
