@@ -98,7 +98,15 @@ var rootCmd = &cobra.Command{
 			log.GetAccessLogger(serverConfig.RootDir),
 		)
 		go func() {
-			err := server.HTTPServer.ListenAndServe()
+			var err error
+			if server.ArmoryServerConfig.TLSEnabled {
+				err = server.HTTPServer.ListenAndServeTLS(
+					server.ArmoryServerConfig.TLSCertificate,
+					server.ArmoryServerConfig.TLSKey,
+				)
+			} else {
+				err = server.HTTPServer.ListenAndServe()
+			}
 			if err != nil {
 				os.Exit(1)
 			}

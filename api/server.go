@@ -47,7 +47,9 @@ type ArmoryServerConfig struct {
 	ListenHost string `json:"lhost"`
 	ListenPort uint16 `json:"lport"`
 
-	EnableTLS bool `json:"enable_tls"`
+	TLSEnabled     bool   `json:"tls_enabled"`
+	TLSCertificate string `json:"tls_certificate"`
+	TLSKey         string `json:"tls_key"`
 
 	RootDir    string `json:"root_dir"`
 	PublicKey  string `json:"public_key"`
@@ -59,9 +61,11 @@ type ArmoryServerConfig struct {
 	ReadTimeout  time.Duration `json:"read_timeout"`
 }
 
+// RepoURL - Returns the (most likely) repo URL, if no domain is provided
+// we attempt to determine the primary interface IP address.
 func (c *ArmoryServerConfig) RepoURL() string {
 	scheme := "http"
-	if c.EnableTLS {
+	if c.TLSEnabled {
 		scheme = "https"
 	}
 	host := c.DomainName
@@ -141,9 +145,11 @@ func New(config *ArmoryServerConfig, app *logrus.Logger, access *logrus.Logger) 
 		Addr:         fmt.Sprintf("%s:%d", config.ListenHost, config.ListenPort),
 		WriteTimeout: config.WriteTimeout,
 		ReadTimeout:  config.ReadTimeout,
-		TLSConfig: &tls.Config{
+	}
+	if server.ArmoryServerConfig.TLSEnabled {
+		server.HTTPServer.TLSConfig = &tls.Config{
 			MinVersion: tls.VersionTLS13,
-		},
+		}
 	}
 
 	return server
@@ -153,7 +159,7 @@ func New(config *ArmoryServerConfig, app *logrus.Logger, access *logrus.Logger) 
 // Handlers
 // --------------
 
-// IndexHandler
+// IndexHandler - Returns the index of extensions, aliases, and bundles
 func (s *ArmoryServer) IndexHandler(resp http.ResponseWriter, req *http.Request) {
 	resp.Header().Set("Content-Type", "application/json")
 	data, err := json.Marshal("{}")
@@ -165,7 +171,7 @@ func (s *ArmoryServer) IndexHandler(resp http.ResponseWriter, req *http.Request)
 	resp.Write(data)
 }
 
-// AliasesHandler
+// AliasesHandler - Returns alias tars and minisigs
 func (s *ArmoryServer) AliasesHandler(resp http.ResponseWriter, req *http.Request) {
 	resp.Header().Set("Content-Type", "application/octet-stream")
 	data, err := json.Marshal("{}")
@@ -177,7 +183,7 @@ func (s *ArmoryServer) AliasesHandler(resp http.ResponseWriter, req *http.Reques
 	resp.Write(data)
 }
 
-// ExtensionsHandler
+// ExtensionsHandler - Returns extension tars and minisigs
 func (s *ArmoryServer) ExtensionsHandler(resp http.ResponseWriter, req *http.Request) {
 	resp.Header().Set("Content-Type", "application/octet-stream")
 	data, err := json.Marshal("{}")

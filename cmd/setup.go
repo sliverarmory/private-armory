@@ -101,7 +101,7 @@ var setupCmd = &cobra.Command{
 			RootDir:                  rootDir,
 			AuthorizationTokenDigest: tokenDigest,
 			PublicKey:                public.String(),
-			EnableTLS:                enableTLS,
+			TLSEnabled:               enableTLS,
 		}
 		serverConfigData, _ := json.MarshalIndent(serverConfig, "", "  ")
 		ioutil.WriteFile(filepath.Join(rootDir, configFileName), serverConfigData, 0644)
