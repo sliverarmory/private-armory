@@ -41,6 +41,8 @@ const (
 
 	configFileName     = "config.json"
 	privateKeyFileName = "private.key"
+
+	userConfigFileName = "user-config.json"
 )
 
 var setupCmd = &cobra.Command{
@@ -50,7 +52,7 @@ var setupCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		rootDir, err := cmd.Flags().GetString(rootDirFlagStr)
 		if err != nil {
-			fmt.Printf("Error parsing flag --%s, %s\n", rootDirFlagStr, err)
+			fmt.Printf(Warn+"Error parsing flag --%s, %s\n", rootDirFlagStr, err)
 			return
 		}
 		if rootDir == "" {
@@ -58,11 +60,11 @@ var setupCmd = &cobra.Command{
 			rootDir = filepath.Join(cwd, armoryRootDirName)
 		}
 		if _, err := os.Stat(rootDir); os.IsNotExist(err) {
-			fmt.Printf("Root directory '%s' does not exist!\n", rootDir)
+			fmt.Printf(Info+"Root directory '%s' does not exist!\n", rootDir)
 			if userConfirm(fmt.Sprintf("Create root directory '%s' ?", rootDir)) {
 				err = os.Mkdir(rootDir, 0755)
 				if err != nil {
-					fmt.Printf("Error failed to create '%s' %s\n", rootDir, err)
+					fmt.Printf(Warn+"Error failed to create '%s' %s\n", rootDir, err)
 					return
 				}
 				os.Mkdir(filepath.Join(rootDir, extensionsDirName), 0755)
@@ -73,10 +75,15 @@ var setupCmd = &cobra.Command{
 			}
 		}
 
-		fmt.Printf("Generating default configuration: %s\n", filepath.Join(rootDir, configFileName))
+		domain := ""
+		survey.AskOne(&survey.Input{Message: "Domain name (or blank):"}, &domain)
+
+		enableTLS := userConfirm("Enable TLS?")
+
+		fmt.Printf(Info+"Generating default configuration: %s\n", filepath.Join(rootDir, configFileName))
 		public, private, err := minisign.GenerateKey(rand.Reader)
 		if err != nil {
-			fmt.Printf("Failed to generate public/private key(s): %s\n", err)
+			fmt.Printf(Warn+"Failed to generate public/private key(s): %s\n", err)
 			return
 		}
 		password := userPassword()
@@ -87,20 +94,26 @@ var setupCmd = &cobra.Command{
 		}
 		ioutil.WriteFile(filepath.Join(rootDir, privateKeyFileName), encryptedPrivateKey, 0644)
 		token, tokenDigest := randomAuthorizationToken()
-		configData, _ := json.MarshalIndent(&api.ArmoryServerConfig{
+		serverConfig := &api.ArmoryServerConfig{
+			DomainName:               domain,
 			ListenHost:               "",
 			ListenPort:               8888,
 			RootDir:                  rootDir,
 			AuthorizationTokenDigest: tokenDigest,
 			PublicKey:                public.String(),
-		}, "", "  ")
-		ioutil.WriteFile(filepath.Join(rootDir, configFileName), configData, 0644)
+			EnableTLS:                enableTLS,
+		}
+		serverConfigData, _ := json.MarshalIndent(serverConfig, "", "  ")
+		ioutil.WriteFile(filepath.Join(rootDir, configFileName), serverConfigData, 0644)
 
-		fmt.Printf("****************************************************\n")
-		fmt.Printf("          Armory URL: %s\n", "")
-		fmt.Printf(" Authorization token: %s\n", token)
-		fmt.Printf("          Public key: %s", public.String())
-		fmt.Printf("****************************************************\n")
+		fmt.Println()
+		userConfig, _ := json.MarshalIndent(&ArmoryClientConfig{
+			PublicKey:     public.String(),
+			RepoURL:       serverConfig.RepoURL(),
+			Authorization: token,
+		}, "", "    ")
+		fmt.Printf(Bold + "*** THIS WILL ONLY BE SHOWN ONCE ***\n")
+		fmt.Printf(Bold+">>> User Config:%s\n%s\n", Normal, userConfig)
 	},
 }
 

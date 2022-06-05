@@ -24,7 +24,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -45,6 +47,8 @@ type ArmoryServerConfig struct {
 	ListenHost string `json:"lhost"`
 	ListenPort uint16 `json:"lport"`
 
+	EnableTLS bool `json:"enable_tls"`
+
 	RootDir    string `json:"root_dir"`
 	PublicKey  string `json:"public_key"`
 	PrivateKey string `json:"private_key"`
@@ -53,6 +57,32 @@ type ArmoryServerConfig struct {
 
 	WriteTimeout time.Duration `json:"write_timeout"`
 	ReadTimeout  time.Duration `json:"read_timeout"`
+}
+
+func (c *ArmoryServerConfig) RepoURL() string {
+	scheme := "http"
+	if c.EnableTLS {
+		scheme = "https"
+	}
+	host := c.DomainName
+	if host == "" {
+		host = c.getOutboundIP()
+	}
+	repoURL, err := url.Parse(scheme + "://" + host)
+	if err != nil {
+		return ""
+	}
+	return repoURL.String()
+}
+
+func (c *ArmoryServerConfig) getOutboundIP() string {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	return localAddr.IP.String()
 }
 
 // ArmoryIndex - Root index, must be signed by server private key
@@ -100,6 +130,7 @@ func New(config *ArmoryServerConfig, app *logrus.Logger, access *logrus.Logger) 
 	if server.ArmoryServerConfig.AuthorizationTokenDigest != "" {
 		armoryRouter.Use(server.authorizationTokenMiddleware)
 	}
+	armoryRouter.Use(server.versionHeaderMiddleware)
 
 	armoryRouter.HandleFunc("/index", server.IndexHandler).Methods(http.MethodGet)
 	armoryRouter.HandleFunc("/aliases", server.AliasesHandler).Methods(http.MethodGet)
@@ -177,6 +208,13 @@ func (s *ArmoryServer) defaultHeadersMiddleware(next http.Handler) http.Handler 
 	return http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) {
 		resp.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none';")
 		resp.Header().Set("X-Frame-Options", "deny")
+		next.ServeHTTP(resp, req)
+	})
+}
+
+func (s *ArmoryServer) versionHeaderMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) {
+		resp.Header().Set("Armory-API-Version", VersionHeader)
 		next.ServeHTTP(resp, req)
 	})
 }

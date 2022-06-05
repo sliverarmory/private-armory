@@ -29,6 +29,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// ArmoryClientConfig - The armory config file
+type ArmoryClientConfig struct {
+	PublicKey        string `json:"public_key"`
+	RepoURL          string `json:"repo_url"`
+	Authorization    string `json:"authorization"`
+	AuthorizationCmd string `json:"authorization_cmd,omitempty"`
+}
+
 func getServerConfig(cmd *cobra.Command) *api.ArmoryServerConfig {
 	serverConfig := &api.ArmoryServerConfig{}
 	configPath, err := cmd.Flags().GetString(configFlagStr)

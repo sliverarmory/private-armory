@@ -32,7 +32,8 @@ import (
 )
 
 const (
-	armoryIndexFileName = "armory-index.json"
+	armoryIndexFileName    = "armory-index.json"
+	armoryIndexSigFileName = "armory-index.minsig"
 )
 
 var refreshCmd = &cobra.Command{
@@ -68,7 +69,7 @@ var refreshCmd = &cobra.Command{
 			return
 		}
 		sig := minisign.Sign(privateKey, data)
-		err = ioutil.WriteFile(filepath.Join(serverConfig.RootDir, armoryIndexFileName+".minisig"), sig, 0644)
+		err = ioutil.WriteFile(filepath.Join(serverConfig.RootDir, armoryIndexSigFileName), sig, 0644)
 		if err != nil {
 			appLog.Errorf("Failed to write armory index signature: %s", err)
 			return
