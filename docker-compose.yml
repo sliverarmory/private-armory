@@ -6,4 +6,4 @@ services:
     ports:
       - "8888:8888"
     volumes:
-      - ./armory-root:/opt/armory-root:ro
+      - ./armory-root:/data/armory-root:ro
