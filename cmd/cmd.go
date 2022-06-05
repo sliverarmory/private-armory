@@ -93,18 +93,24 @@ var rootCmd = &cobra.Command{
 		if serverConfig == nil {
 			return
 		}
+		appLog := log.GetAppLogger(serverConfig.RootDir)
 		server := api.New(serverConfig,
-			log.GetAppLogger(serverConfig.RootDir),
+			appLog,
 			log.GetAccessLogger(serverConfig.RootDir),
 		)
+		appLog.Infof("Starting with root dir: %s", serverConfig.RootDir)
 		go func() {
 			var err error
 			if server.ArmoryServerConfig.TLSEnabled {
+				appLog.Infof("TLS is ENABLED")
+				appLog.Debugf("TLS certificate file: %s", server.ArmoryServerConfig.TLSCertificate)
+				appLog.Debugf("TLS key file: %s", server.ArmoryServerConfig.TLSKey)
 				err = server.HTTPServer.ListenAndServeTLS(
 					server.ArmoryServerConfig.TLSCertificate,
 					server.ArmoryServerConfig.TLSKey,
 				)
 			} else {
+				appLog.Infof("TLS is DISABLED")
 				err = server.HTTPServer.ListenAndServe()
 			}
 			if err != nil {

@@ -123,14 +123,15 @@ func New(config *ArmoryServerConfig, app *logrus.Logger, access *logrus.Logger) 
 		AppLog:             app,
 	}
 	router := mux.NewRouter()
+	router.NotFoundHandler = jsonNotFoundHandler{}
 	router.Use(server.defaultHeadersMiddleware)
+	router.Use(server.loggingMiddleware)
 
 	// Public Handlers
 	router.HandleFunc("/health", server.healthHandler)
 
 	// Armory Handlers
 	armoryRouter := router.PathPrefix("/armory").Subrouter()
-	armoryRouter.Use(server.loggingMiddleware)
 	if server.ArmoryServerConfig.AuthorizationTokenDigest != "" {
 		armoryRouter.Use(server.authorizationTokenMiddleware)
 	}
@@ -158,6 +159,14 @@ func New(config *ArmoryServerConfig, app *logrus.Logger, access *logrus.Logger) 
 // --------------
 // Handlers
 // --------------
+
+type jsonNotFoundHandler struct{}
+
+func (jsonNotFoundHandler) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
+	resp.WriteHeader(http.StatusNotFound)
+	resp.Header().Set("Content-Type", "application/json")
+	resp.Write([]byte{})
+}
 
 // IndexHandler - Returns the index of extensions, aliases, and bundles
 func (s *ArmoryServer) IndexHandler(resp http.ResponseWriter, req *http.Request) {
@@ -239,8 +248,8 @@ func (s *ArmoryServer) loggingMiddleware(next http.Handler) http.Handler {
 
 // healthHandler - Simple health check
 func (s *ArmoryServer) healthHandler(resp http.ResponseWriter, req *http.Request) {
-	resp.Header().Set("Content-Type", "application/json")
 	resp.WriteHeader(http.StatusOK)
+	resp.Header().Set("Content-Type", "application/json")
 	resp.Write([]byte(`{"health": "ok"}`))
 }
 

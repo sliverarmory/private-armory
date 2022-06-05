@@ -21,7 +21,7 @@ package log
 import (
 	"fmt"
 	"os"
-	"path"
+	"path/filepath"
 
 	"github.com/sirupsen/logrus"
 )
@@ -33,7 +33,7 @@ func GetAppLogger(rootDir string) *logrus.Logger {
 		ForceColors:   false,
 		FullTimestamp: true,
 	}
-	txtFilePath := path.Join(rootDir, "app.log")
+	txtFilePath := filepath.Join(rootDir, "app.log")
 	var err error
 	txtFile, err := os.OpenFile(txtFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
 	if err != nil {
@@ -51,7 +51,7 @@ func GetAccessLogger(rootDir string) *logrus.Logger {
 		ForceColors:   false,
 		FullTimestamp: true,
 	}
-	txtFilePath := path.Join(rootDir, "access.log")
+	txtFilePath := filepath.Join(rootDir, "access.log")
 	var err error
 	txtFile, err := os.OpenFile(txtFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
 	if err != nil {

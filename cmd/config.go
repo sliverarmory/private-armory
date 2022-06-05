@@ -24,6 +24,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"os"
+	"path/filepath"
 
 	"github.com/sliverarmory/external-armory/api"
 	"github.com/spf13/cobra"
@@ -44,17 +46,19 @@ func getServerConfig(cmd *cobra.Command) *api.ArmoryServerConfig {
 		fmt.Printf("Error parsing flag --%s, %s\n", configFlagStr, err)
 		return nil
 	}
-	if configPath != "" {
-		configData, err := ioutil.ReadFile(configPath)
-		if err != nil {
-			fmt.Printf("Error reading config file %s, %s\n", configPath, err)
-			return nil
-		}
-		err = json.Unmarshal(configData, serverConfig)
-		if err != nil {
-			fmt.Printf("Error parsing config file %s, %s\n", configPath, err)
-			return nil
-		}
+	if configPath == "" {
+		cwd, _ := os.Getwd()
+		configPath = filepath.Join(cwd, armoryRootDirName, configFileName)
+	}
+	configData, err := ioutil.ReadFile(configPath)
+	if err != nil {
+		fmt.Printf("Error reading config file %s, %s\n", configPath, err)
+		return nil
+	}
+	err = json.Unmarshal(configData, serverConfig)
+	if err != nil {
+		fmt.Printf("Error parsing config file %s, %s\n", configPath, err)
+		return nil
 	}
 
 	// CLI flags override config file

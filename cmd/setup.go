@@ -50,14 +50,10 @@ var setupCmd = &cobra.Command{
 	Short: "Perform initial setup",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
-		rootDir, err := cmd.Flags().GetString(rootDirFlagStr)
+		rootDir, err := getRootDir(cmd)
 		if err != nil {
-			fmt.Printf(Warn+"Error parsing flag --%s, %s\n", rootDirFlagStr, err)
+			fmt.Printf(Warn+"%s\n", err)
 			return
-		}
-		if rootDir == "" {
-			cwd, _ := os.Getwd()
-			rootDir = filepath.Join(cwd, armoryRootDirName)
 		}
 		if _, err := os.Stat(rootDir); os.IsNotExist(err) {
 			fmt.Printf(Info+"Root directory '%s' does not exist!\n", rootDir)
@@ -131,4 +127,19 @@ func userConfirm(msg string) bool {
 	prompt := &survey.Confirm{Message: msg}
 	survey.AskOne(prompt, &confirmed)
 	return confirmed
+}
+
+func getRootDir(cmd *cobra.Command) (string, error) {
+	rootDir, err := cmd.Flags().GetString(rootDirFlagStr)
+	if err != nil {
+		return "", fmt.Errorf("Error parsing flag --%s, %s", rootDirFlagStr, err)
+	}
+	if rootDir == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", err
+		}
+		rootDir = filepath.Join(cwd, armoryRootDirName)
+	}
+	return rootDir, nil
 }
