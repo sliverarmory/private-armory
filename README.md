@@ -1,6 +1,8 @@
 # External Armory
 
-A standalone Sliver Armory implementation for self-hosted Sliver Armories.
+External Armory is a standalone Sliver Armory implementation for self-hosted Sliver Armories. This allows you to easily distribute and update your private Sliver extensions (BOFs, etc.), aliases (.NET tooling, etc.), and bundles.
+
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 ### Setup
 
