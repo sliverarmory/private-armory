@@ -21,6 +21,7 @@ package api
 import (
 	"crypto/sha256"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,7 +30,6 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -114,6 +114,16 @@ type ArmoryBundle struct {
 	Packages []string `json:"packages"`
 }
 
+type armoryIndexResponse struct {
+	Minisig     string `json:"minisig"`      // Minisig
+	ArmoryIndex string `json:"armory_index"` // Base64 String
+}
+
+type armoryPkgResponse struct {
+	Minisig  string `json:"minisig"` // Minisig
+	TarGzURL string `json:"tar_gz_url"`
+}
+
 // JSONError - Return an error in JSON format
 type JSONError struct {
 	Error string `json:"error"`
@@ -144,8 +154,7 @@ func New(config *ArmoryServerConfig, app *logrus.Logger, access *logrus.Logger) 
 	}
 	armoryRouter.Use(server.versionHeaderMiddleware)
 
-	armoryRouter.HandleFunc("/index.json", server.IndexHandler).Methods(http.MethodGet)
-	armoryRouter.HandleFunc("/index.minisig", server.IndexHandler).Methods(http.MethodGet)
+	armoryRouter.HandleFunc("/index", server.IndexHandler).Methods(http.MethodGet)
 	armoryRouter.HandleFunc("/aliases", server.AliasesHandler).Methods(http.MethodGet)
 	armoryRouter.HandleFunc("/extensions", server.ExtensionsHandler).Methods(http.MethodGet)
 
@@ -177,34 +186,30 @@ func (jsonNotFoundHandler) ServeHTTP(resp http.ResponseWriter, req *http.Request
 
 // IndexHandler - Returns the index of extensions, aliases, and bundles
 func (s *ArmoryServer) IndexHandler(resp http.ResponseWriter, req *http.Request) {
-	var data []byte
-	if strings.HasSuffix(req.URL.Path, ".json") {
-		data = s.getIndexJSON()
-	} else {
-		data = s.getIndexMinisig()
-	}
+	resp.Header().Set("Content-Type", "application/json; charset=utf-8")
+	index, sig := s.getIndex()
+	data, _ := json.Marshal(&armoryIndexResponse{
+		Minisig:     base64.StdEncoding.EncodeToString(sig),
+		ArmoryIndex: base64.StdEncoding.EncodeToString(index),
+	})
 	resp.WriteHeader(http.StatusOK)
 	resp.Write(data)
 }
 
-func (s *ArmoryServer) getIndexJSON() []byte {
+func (s *ArmoryServer) getIndex() ([]byte, []byte) {
 	indexPath := filepath.Join(s.ArmoryServerConfig.RootDir, consts.ArmoryIndexFileName)
-	data, err := ioutil.ReadFile(indexPath)
+	indexData, err := ioutil.ReadFile(indexPath)
 	if err != nil {
 		s.AppLog.Errorf("Error reading index: %s", err)
-		return []byte{}
+		return nil, nil
 	}
-	return data
-}
-
-func (s *ArmoryServer) getIndexMinisig() []byte {
 	indexSigPath := filepath.Join(s.ArmoryServerConfig.RootDir, consts.ArmoryIndexSigFileName)
-	data, err := ioutil.ReadFile(indexSigPath)
+	sigData, err := ioutil.ReadFile(indexSigPath)
 	if err != nil {
 		s.AppLog.Errorf("Error reading index: %s", err)
-		return []byte{}
+		return nil, nil
 	}
-	return data
+	return indexData, sigData
 }
 
 // AliasesHandler - Returns alias tars and minisigs
@@ -276,20 +281,17 @@ func (s *ArmoryServer) loggingMiddleware(next http.Handler) http.Handler {
 // healthHandler - Simple health check
 func (s *ArmoryServer) healthHandler(resp http.ResponseWriter, req *http.Request) {
 	resp.WriteHeader(http.StatusOK)
-	resp.Header().Set("Content-Type", "application/json")
+	resp.Header().Set("Content-Type", "application/json; charset=utf-8")
 	resp.Write([]byte(`{"health": "ok"}`))
 }
 
 func (s *ArmoryServer) jsonError(resp http.ResponseWriter, err error) {
-	resp.WriteHeader(http.StatusBadRequest)
-	resp.Header().Set("Content-Type", "application/json")
-	data, _ := json.Marshal(JSONError{Error: err.Error()})
 	s.AppLog.Error(err)
-	resp.Write(data)
+	resp.WriteHeader(http.StatusNotFound)
+	resp.Write([]byte{})
 }
 
 func (s *ArmoryServer) jsonForbidden(resp http.ResponseWriter, err error) {
-	resp.WriteHeader(http.StatusForbidden)
-	s.AppLog.Error(err)
+	resp.WriteHeader(http.StatusNotFound)
 	resp.Write([]byte{})
 }

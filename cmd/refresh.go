@@ -36,7 +36,7 @@ import (
 
 const (
 	armoryIndexFileName    = "armory-index.json"
-	armoryIndexSigFileName = "armory-index.minsig"
+	armoryIndexSigFileName = "armory-index.minisig"
 )
 
 var refreshCmd = &cobra.Command{

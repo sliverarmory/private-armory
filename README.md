@@ -1,6 +1,6 @@
 # External Armory
 
-An Armory implementation for self-hosted private Sliver armories.
+An Armory implementation for self-hosted Sliver Armories.
 
 ### Setup
 
@@ -10,7 +10,7 @@ See the [wiki](https://github.com/sliverarmory/external-armory/wiki/Setup) for t
 
 #### Is this the same code that the official Sliver Armory uses?
 
-No. The official Sliver Armory is entirely hosted on public GitHub, i.e. none of the official armory's underlying infrastructure is managed by the Sliver authors. However, this model is not viable for private armories, and thus this implementation allows self-hosted private armories, though you could also use it to host 3rd party public armories as well on your own infrastructure.
+No. The official Sliver Armory is entirely hosted on public GitHub, i.e. none of the official armory's underlying infrastructure is managed by the Sliver authors. However, this model is not viable for private/3rd party armories, and thus this implementation allows you to self-host your own armory.
 
 ### License - GPLv3
 
