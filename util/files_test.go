@@ -1,8 +1,8 @@
-package consts
+package util
 
 /*
 	Sliver Implant Framework
-	Copyright (C) 2022  Bishop Fox
+	Copyright (C) 2019  Bishop Fox
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -18,15 +18,26 @@ package consts
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-const (
-	ArmoryRootDirName = "armory-data"
-	ExtensionsDirName = "extensions"
-	AliasesDirName    = "aliases"
-	BundlesFileName   = "bundles.json"
-	ConfigFileName    = "config.json"
-
-	// Should not be edited directly, so hide them
-	ArmoryIndexFileName    = ".armory-index.json"
-	ArmoryIndexSigFileName = ".armory-index.minsig"
-	SignaturesDirName      = ".armory-minisigs"
+import (
+	"bytes"
+	"crypto/rand"
+	insecureRand "math/rand"
+	"testing"
 )
+
+func randomDataRandomSize(maxSize int) []byte {
+	buf := make([]byte, insecureRand.Intn(maxSize))
+	rand.Read(buf)
+	return buf
+}
+
+func TestGzipGunzip(t *testing.T) {
+	for i := 0; i < 100; i++ {
+		data := randomDataRandomSize(8192)
+		gzipData := GzipBuf(data)
+		gunzipData := GunzipBuf(gzipData)
+		if !bytes.Equal(data, gunzipData) {
+			t.Fatalf("Data does not match")
+		}
+	}
+}

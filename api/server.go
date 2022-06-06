@@ -115,12 +115,12 @@ type ArmoryBundle struct {
 }
 
 type armoryIndexResponse struct {
-	Minisig     string `json:"minisig"`      // Minisig
-	ArmoryIndex string `json:"armory_index"` // Base64 String
+	Minisig     string `json:"minisig"`      // Minisig (Base 64)
+	ArmoryIndex string `json:"armory_index"` // Index JSON (Base 64)
 }
 
 type armoryPkgResponse struct {
-	Minisig  string `json:"minisig"` // Minisig
+	Minisig  string `json:"minisig"` // Minisig (Base 64)
 	TarGzURL string `json:"tar_gz_url"`
 }
 

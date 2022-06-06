@@ -120,11 +120,10 @@ var rootCmd = &cobra.Command{
 			} else {
 				appLog.Infof("Forcing refresh of armory index ...")
 			}
-			success, data := refreshArmoryIndex(serverConfig, appLog)
+			success := refreshArmoryIndex(serverConfig, appLog)
 			if !success {
 				os.Exit(2)
 			}
-			signArmoryIndex(data, serverConfig, appLog)
 		}
 
 		go func() {
@@ -132,7 +131,13 @@ var rootCmd = &cobra.Command{
 			if server.ArmoryServerConfig.TLSEnabled {
 				appLog.Infof("TLS is ENABLED")
 				appLog.Debugf("TLS certificate file: %s", server.ArmoryServerConfig.TLSCertificate)
+				if _, err := os.Stat(server.ArmoryServerConfig.TLSCertificate); os.IsNotExist(err) {
+					appLog.Warnf("TLS certificate file path does not exist '%s'", server.ArmoryServerConfig.TLSCertificate)
+				}
 				appLog.Debugf("TLS key file: %s", server.ArmoryServerConfig.TLSKey)
+				if _, err := os.Stat(server.ArmoryServerConfig.TLSKey); os.IsNotExist(err) {
+					appLog.Warnf("TLS key file path does not exist '%s'", server.ArmoryServerConfig.TLSKey)
+				}
 				err = server.HTTPServer.ListenAndServeTLS(
 					server.ArmoryServerConfig.TLSCertificate,
 					server.ArmoryServerConfig.TLSKey,

@@ -59,6 +59,7 @@ var setupCmd = &cobra.Command{
 				}
 				os.Mkdir(filepath.Join(rootDir, consts.ExtensionsDirName), 0755)
 				os.Mkdir(filepath.Join(rootDir, consts.AliasesDirName), 0755)
+				os.Mkdir(filepath.Join(rootDir, consts.SignaturesDirName), 0755)
 				ioutil.WriteFile(filepath.Join(rootDir, consts.BundlesFileName), []byte(`[]`), 0644)
 			} else {
 				return

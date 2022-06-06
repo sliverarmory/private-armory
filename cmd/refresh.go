@@ -19,20 +19,78 @@ package cmd
 */
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
 	"aead.dev/minisign"
+
 	"github.com/sirupsen/logrus"
 	"github.com/sliverarmory/external-armory/api"
 	"github.com/sliverarmory/external-armory/consts"
 	"github.com/sliverarmory/external-armory/log"
+	"github.com/sliverarmory/external-armory/util"
 	"github.com/spf13/cobra"
 )
+
+type ExtensionManifest struct {
+	Name            string               `json:"name"`
+	CommandName     string               `json:"command_name"`
+	Version         string               `json:"version"`
+	ExtensionAuthor string               `json:"extension_author"`
+	OriginalAuthor  string               `json:"original_author"`
+	RepoURL         string               `json:"repo_url"`
+	Help            string               `json:"help"`
+	LongHelp        string               `json:"long_help"`
+	Files           []*extensionFile     `json:"files"`
+	Arguments       []*extensionArgument `json:"arguments"`
+	Entrypoint      string               `json:"entrypoint"`
+	DependsOn       string               `json:"depends_on"`
+	Init            string               `json:"init"`
+}
+
+type extensionFile struct {
+	OS   string `json:"os"`
+	Arch string `json:"arch"`
+	Path string `json:"path"`
+}
+
+type extensionArgument struct {
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Desc     string `json:"desc"`
+	Optional bool   `json:"optional"`
+}
+
+// AliasFile - An OS/Arch specific file
+type AliasFile struct {
+	OS   string `json:"os"`
+	Arch string `json:"arch"`
+	Path string `json:"path"`
+}
+
+// AliasManifest - The manifest for an alias, contains metadata
+type AliasManifest struct {
+	Name           string `json:"name"`
+	Version        string `json:"version"`
+	CommandName    string `json:"command_name"`
+	OriginalAuthor string `json:"original_author"`
+	RepoURL        string `json:"repo_url"`
+	Help           string `json:"help"`
+	LongHelp       string `json:"long_help"`
+
+	Entrypoint   string       `json:"entrypoint"`
+	AllowArgs    bool         `json:"allow_args"`
+	DefaultArgs  string       `json:"default_args"`
+	Files        []*AliasFile `json:"files"`
+	IsReflective bool         `json:"is_reflective"`
+	IsAssembly   bool         `json:"is_assembly"`
+}
 
 var refreshCmd = &cobra.Command{
 	Use:   "refresh",
@@ -45,61 +103,97 @@ var refreshCmd = &cobra.Command{
 		}
 		appLog := log.GetAppLogger(serverConfig.RootDir)
 		fmt.Printf(Info + "Refreshing armory index ...\n")
-		success, data := refreshArmoryIndex(serverConfig, appLog)
+		success := refreshArmoryIndex(serverConfig, appLog)
 		if !success {
 			fmt.Printf(Warn + "Failed to refresh armory index, check logs")
 			return
 		}
-		fmt.Printf(Info + "Signing armory index ...\n")
-		signArmoryIndex(data, serverConfig, appLog)
 		fmt.Printf(Success + "Successfully refreshed armory index.\n")
 	},
 }
 
-func signArmoryIndex(data []byte, serverConfig *api.ArmoryServerConfig, appLog *logrus.Logger) {
-	password := userPassword()
-	privateKey, err := minisign.PrivateKeyFromFile(password, filepath.Join(serverConfig.RootDir, privateKeyFileName))
-	if err != nil {
-		appLog.Errorf("Failed to load private key: %s", err)
-		return
-	}
+func signArmoryIndex(privateKey minisign.PrivateKey, data []byte, serverConfig *api.ArmoryServerConfig, appLog *logrus.Logger) {
 	sig := minisign.Sign(privateKey, data)
-	err = ioutil.WriteFile(filepath.Join(serverConfig.RootDir, consts.ArmoryIndexSigFileName), sig, 0644)
+	err := ioutil.WriteFile(filepath.Join(serverConfig.RootDir, consts.ArmoryIndexSigFileName), sig, 0644)
 	if err != nil {
 		appLog.Errorf("Failed to write armory index signature: %s", err)
 		return
 	}
 }
 
-func refreshArmoryIndex(serverConfig *api.ArmoryServerConfig, appLog *logrus.Logger) (bool, []byte) {
-	index, err := generateArmoryIndex(serverConfig.RootDir)
+func refreshArmoryIndex(serverConfig *api.ArmoryServerConfig, appLog *logrus.Logger) bool {
+
+	password := userPassword()
+	privateKey, err := minisign.PrivateKeyFromFile(password, filepath.Join(serverConfig.RootDir, privateKeyFileName))
+	if err != nil {
+		appLog.Errorf("Failed to load private key: %s", err)
+		return false
+	}
+
+	index, err := generateArmoryIndex(serverConfig.RootDir, privateKey)
 	if err != nil {
 		appLog.Errorf("Failed to generate armory index: %s", err)
-		return false, nil
+		return false
+	}
+	for _, entry := range index.Aliases {
+		entry.PublicKey = serverConfig.PublicKey
+		entry.RepoURL = serverConfig.RepoURL() + "/" + path.Join("armory", "alias", path.Base(entry.CommandName))
+	}
+	for _, entry := range index.Extensions {
+		entry.PublicKey = serverConfig.PublicKey
+		entry.RepoURL = serverConfig.RepoURL() + "/" + path.Join("armory", "extensions", path.Base(entry.CommandName))
 	}
 	data, err := json.MarshalIndent(index, "", "  ")
 	if err != nil {
 		appLog.Errorf("Failed to marshal armory index: %s", err)
-		return false, nil
+		return false
 	}
 	err = ioutil.WriteFile(filepath.Join(serverConfig.RootDir, consts.ArmoryIndexFileName), data, 0644)
 	if err != nil {
 		appLog.Errorf("Failed to write armory index: %s", err)
-		return false, nil
+		return false
 	}
-	return true, data
+	signArmoryIndex(privateKey, data, serverConfig, appLog)
+	return true
+}
+
+func signFile(rootDir string, privateKey minisign.PrivateKey, manifest []byte, fileToSign string) error {
+	sigPath := filepath.Join(rootDir, consts.SignaturesDirName, filepath.Base(strings.TrimSuffix(fileToSign, ".tar.gz")))
+	data, err := ioutil.ReadFile(fileToSign)
+	if err != nil {
+		return err
+	}
+	sigData := minisign.SignWithComments(privateKey, data, base64.StdEncoding.EncodeToString(manifest), "")
+	err = ioutil.WriteFile(sigPath, sigData, 0o644)
+	return err
 }
 
 // GenerateArmoryIndex - Generate the armory index
-func generateArmoryIndex(rootDir string) (*api.ArmoryIndex, error) {
-	aliases, err := getAliases(rootDir)
+func generateArmoryIndex(rootDir string, privateKey minisign.PrivateKey) (*api.ArmoryIndex, error) {
+	aliases, aliasManifests, err := getAliases(rootDir)
 	if err != nil {
 		return nil, err
 	}
-	extensions, err := getExtensions(rootDir)
+	for commandName, data := range aliasManifests {
+		fileToSign := filepath.Join(rootDir, consts.ExtensionsDirName, fmt.Sprintf("%s.tar.gz", commandName))
+		err = signFile(rootDir, privateKey, data, fileToSign)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	extensions, extensionManifests, err := getExtensions(rootDir)
 	if err != nil {
 		return nil, err
 	}
+	for commandName, data := range extensionManifests {
+		fileToSign := filepath.Join(rootDir, consts.ExtensionsDirName, fmt.Sprintf("%s.tar.gz", commandName))
+		err = signFile(rootDir, privateKey, data, fileToSign)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	bundles, err := getBundles(rootDir)
 	if err != nil {
 		return nil, err
@@ -111,21 +205,22 @@ func generateArmoryIndex(rootDir string) (*api.ArmoryIndex, error) {
 	}, nil
 }
 
-func getAliases(rootDir string) ([]*api.ArmoryEntry, error) {
+func getAliases(rootDir string) ([]*api.ArmoryEntry, map[string][]byte, error) {
 	appLog := log.GetAppLogger(rootDir)
 	aliasesPath := filepath.Join(rootDir, consts.AliasesDirName)
 	appLog.Infof("Looking for aliases in %s", aliasesPath)
 	if _, err := os.Stat(aliasesPath); os.IsNotExist(err) {
 		appLog.Errorf("Failed to find aliases: %s", err)
-		return nil, err
+		return nil, nil, err
 	}
 	fi, err := ioutil.ReadDir(aliasesPath)
 	if err != nil {
 		appLog.Errorf("Failed to find aliases: %s", err)
-		return nil, err
+		return nil, nil, err
 	}
 
 	entries := []*api.ArmoryEntry{}
+	manifests := map[string][]byte{}
 	for _, entry := range fi {
 		if entry.IsDir() {
 			appLog.Debugf("%v is a directory (skip)", entry)
@@ -135,26 +230,50 @@ func getAliases(rootDir string) ([]*api.ArmoryEntry, error) {
 			appLog.Debugf("%v not a .tar.gz file (skip)", entry)
 			continue
 		}
+		manifestData, err := util.ReadFileFromTarGz(filepath.Join(aliasesPath, entry.Name()), "./alias.json")
+		if err != nil {
+			appLog.Errorf("Failed to read extension.json from '%s': %s\n", entry.Name(), err)
+			continue
+		}
+		manifest := &AliasManifest{}
+		err = json.Unmarshal(manifestData, manifest)
+		if err != nil {
+			appLog.Errorf("Error parsing alias manifest for '%s'", entry.Name())
+			continue
+		}
+		if strings.TrimSuffix(entry.Name(), ".tar.gz") != manifest.CommandName {
+			appLog.Errorf("Invalid file name '%s' expected '%s'",
+				entry.Name(), fmt.Sprintf("%s.tar.gz", manifest.CommandName),
+			)
+			continue
+		}
+		entries = append(entries, &api.ArmoryEntry{
+			Name:        manifest.Name,
+			CommandName: manifest.CommandName,
+			RepoURL:     "",
+			PublicKey:   "",
+		})
+		manifests[manifest.CommandName] = manifestData
 	}
-
-	return entries, nil
+	return entries, manifests, nil
 }
 
-func getExtensions(rootDir string) ([]*api.ArmoryEntry, error) {
+func getExtensions(rootDir string) ([]*api.ArmoryEntry, map[string][]byte, error) {
 	appLog := log.GetAppLogger(rootDir)
 	extensionsPath := filepath.Join(rootDir, consts.ExtensionsDirName)
 	appLog.Infof("Looking for extensions in %s", extensionsPath)
 	if _, err := os.Stat(extensionsPath); os.IsNotExist(err) {
 		appLog.Errorf("Failed to find extensions: %s", err)
-		return nil, err
+		return nil, nil, err
 	}
 	fi, err := ioutil.ReadDir(extensionsPath)
 	if err != nil {
 		appLog.Errorf("Failed to find extensions: %s", err)
-		return nil, err
+		return nil, nil, err
 	}
 
 	entries := []*api.ArmoryEntry{}
+	manifests := map[string][]byte{}
 	for _, entry := range fi {
 		if entry.IsDir() {
 			appLog.Debugf("%v is a directory (skip)", entry)
@@ -164,9 +283,32 @@ func getExtensions(rootDir string) ([]*api.ArmoryEntry, error) {
 			appLog.Debugf("%v not a .tar.gz file (skip)", entry)
 			continue
 		}
+		manifestData, err := util.ReadFileFromTarGz(filepath.Join(extensionsPath, entry.Name()), "./extension.json")
+		if err != nil {
+			appLog.Errorf("Failed to read extension.json from '%s': %s\n", entry.Name(), err)
+			continue
+		}
+		manifest := &ExtensionManifest{}
+		err = json.Unmarshal(manifestData, manifest)
+		if err != nil {
+			appLog.Errorf("Error parsing extension manifest for '%s'", entry.Name())
+			continue
+		}
+		if strings.TrimSuffix(entry.Name(), ".tar.gz") != manifest.CommandName {
+			appLog.Errorf("Invalid file name '%s' expected '%s'",
+				entry.Name(), fmt.Sprintf("%s.tar.gz", manifest.CommandName),
+			)
+			continue
+		}
+		entries = append(entries, &api.ArmoryEntry{
+			Name:        manifest.Name,
+			CommandName: manifest.CommandName,
+			RepoURL:     "",
+			PublicKey:   "",
+		})
+		manifests[manifest.CommandName] = manifestData
 	}
-
-	return entries, nil
+	return entries, manifests, nil
 }
 
 func getBundles(rootDir string) ([]*api.ArmoryBundle, error) {
