@@ -24,18 +24,27 @@ MIN_SUPPORTED_GO_MAJOR_VERSION = 1
 MIN_SUPPORTED_GO_MINOR_VERSION = 18
 GO_VERSION_VALIDATION_ERR_MSG = Golang version is not supported, please update to at least $(MIN_SUPPORTED_GO_MAJOR_VERSION).$(MIN_SUPPORTED_GO_MINOR_VERSION)
 
-
 VERSION_HEADER ?= 1
 API_PKG = github.com/sliverarmory/external-armory/api
-
 LDFLAGS = "-s -w -X $(API_PKG).VersionHeader=$(VERSION_HEADER)"
+
 
 .PHONY: external-armory
 external-armory:
 	$(GO) build -o external-armory -trimpath -ldflags $(LDFLAGS) .
 
+.PHONY: release
+release:
+	mkdir -p ./release
+	GOOS=linux GOARCH=amd64 $(GO) build -o ./release/external-armory_linux -trimpath -ldflags $(LDFLAGS) .
+	GOOS=linux GOARCH=arm64 $(GO) build -o ./release/external-armory_linux-arm64 -trimpath -ldflags $(LDFLAGS) .
+	GOOS=darwin GOARCH=amd64 $(GO) build -o ./release/external-armory_macos -trimpath -ldflags $(LDFLAGS) .
+	GOOS=darwin GOARCH=arm64 $(GO) build -o ./release/external-armory_macos-arm64 -trimpath -ldflags $(LDFLAGS) .
+	GOOS=windows GOARCH=amd64 $(GO) build -o ./release/external-armory_windows.exe -trimpath -ldflags $(LDFLAGS) .
+
 clean:
-	rm -f external-armory
+	rm -f ./external-armory
+	rm -rf ./release
 
 validate-go-version:
 	@if [ $(GO_MAJOR_VERSION) -gt $(MIN_SUPPORTED_GO_MAJOR_VERSION) ]; then \
