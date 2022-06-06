@@ -180,6 +180,8 @@ func New(config *ArmoryServerConfig, app *logrus.Logger, access *logrus.Logger) 
 type jsonNotFoundHandler struct{}
 
 func (jsonNotFoundHandler) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
+	resp.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none';")
+	resp.Header().Set("X-Frame-Options", "deny")
 	resp.WriteHeader(http.StatusNotFound)
 	resp.Write([]byte{})
 }

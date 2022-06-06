@@ -34,11 +34,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const (
-	armoryIndexFileName    = "armory-index.json"
-	armoryIndexSigFileName = "armory-index.minisig"
-)
-
 var refreshCmd = &cobra.Command{
 	Use:   "refresh",
 	Short: "Refresh the armory index",
@@ -69,7 +64,7 @@ func signArmoryIndex(data []byte, serverConfig *api.ArmoryServerConfig, appLog *
 		return
 	}
 	sig := minisign.Sign(privateKey, data)
-	err = ioutil.WriteFile(filepath.Join(serverConfig.RootDir, armoryIndexSigFileName), sig, 0644)
+	err = ioutil.WriteFile(filepath.Join(serverConfig.RootDir, consts.ArmoryIndexSigFileName), sig, 0644)
 	if err != nil {
 		appLog.Errorf("Failed to write armory index signature: %s", err)
 		return
@@ -87,7 +82,7 @@ func refreshArmoryIndex(serverConfig *api.ArmoryServerConfig, appLog *logrus.Log
 		appLog.Errorf("Failed to marshal armory index: %s", err)
 		return false, nil
 	}
-	err = ioutil.WriteFile(filepath.Join(serverConfig.RootDir, armoryIndexFileName), data, 0644)
+	err = ioutil.WriteFile(filepath.Join(serverConfig.RootDir, consts.ArmoryIndexFileName), data, 0644)
 	if err != nil {
 		appLog.Errorf("Failed to write armory index: %s", err)
 		return false, nil

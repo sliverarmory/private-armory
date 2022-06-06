@@ -39,6 +39,7 @@ const (
 	writeTimeoutFlagStr = "write-timeout"
 	readTimeoutFlagStr  = "read-timeout"
 	disableAuthFlagStr  = "disable-authentication"
+	refreshFlagStr      = "refresh"
 
 	rootDirFlagStr = "root-dir"
 )
@@ -78,8 +79,9 @@ func init() {
 	rootCmd.Flags().BoolP(disableAuthFlagStr, "A", false, "Disable authentication token checks")
 	rootCmd.Flags().StringP(lhostFlagStr, "l", "", "Listen host")
 	rootCmd.Flags().Uint16P(lportFlagStr, "p", 8888, "Listen port")
-	rootCmd.Flags().StringP(readTimeoutFlagStr, "r", "1m", "HTTP read timeout")
-	rootCmd.Flags().StringP(writeTimeoutFlagStr, "w", "1m", "HTTP write timeout")
+	rootCmd.Flags().StringP(readTimeoutFlagStr, "R", "1m", "HTTP read timeout")
+	rootCmd.Flags().StringP(writeTimeoutFlagStr, "W", "1m", "HTTP write timeout")
+	rootCmd.Flags().BoolP(refreshFlagStr, "r", false, "Force refresh of armory index (may require password input)")
 
 	rootCmd.AddCommand(setupCmd)
 	setupCmd.Flags().StringP("root-dir", "R", "", "Root armory directory (must be writable)")
@@ -104,8 +106,20 @@ var rootCmd = &cobra.Command{
 		)
 		appLog.Infof("Starting with root dir: %s", serverConfig.RootDir)
 
-		if _, err := os.Stat(filepath.Join(serverConfig.RootDir, consts.ArmoryIndexFileName)); os.IsNotExist(err) {
-			appLog.Warnf("Missing armory index, will attempt to refresh ...")
+		forceRefresh, err := cmd.Flags().GetBool(refreshFlagStr)
+		if err != nil {
+			fmt.Printf("Error parsing flag --%s, %s\n", refreshFlagStr, err)
+			return
+		}
+
+		if _, err := os.Stat(filepath.Join(serverConfig.RootDir, consts.ArmoryIndexFileName)); os.IsNotExist(err) || forceRefresh {
+			if !forceRefresh {
+				appLog.Warnf("Armory index not found %s, will attempt to refresh ...",
+					filepath.Join(serverConfig.RootDir, consts.ArmoryIndexFileName),
+				)
+			} else {
+				appLog.Infof("Forcing refresh of armory index ...")
+			}
 			success, data := refreshArmoryIndex(serverConfig, appLog)
 			if !success {
 				os.Exit(2)

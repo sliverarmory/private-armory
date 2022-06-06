@@ -25,6 +25,7 @@ const (
 	BundlesFileName   = "bundles.json"
 	ConfigFileName    = "config.json"
 
-	ArmoryIndexFileName    = "armory-index.json"
-	ArmoryIndexSigFileName = "armory-index.minsig"
+	// Should not be edited directly, so hide them
+	ArmoryIndexFileName    = ".armory-index.json"
+	ArmoryIndexSigFileName = ".armory-index.minsig"
 )
