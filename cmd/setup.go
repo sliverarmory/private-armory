@@ -31,20 +31,12 @@ import (
 	"aead.dev/minisign"
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/sliverarmory/external-armory/api"
+	"github.com/sliverarmory/external-armory/consts"
 	"github.com/spf13/cobra"
 )
 
 const (
-	armoryRootDirName = "armory-data"
-
-	extensionsDirName = "extensions"
-	aliasesDirName    = "aliases"
-	bundlesFileName   = "bundles.json"
-
-	configFileName     = "config.json"
 	privateKeyFileName = "private.key"
-
-	userConfigFileName = "user-config.json"
 )
 
 var setupCmd = &cobra.Command{
@@ -65,9 +57,9 @@ var setupCmd = &cobra.Command{
 					fmt.Printf(Warn+"Error failed to create '%s' %s\n", rootDir, err)
 					return
 				}
-				os.Mkdir(filepath.Join(rootDir, extensionsDirName), 0755)
-				os.Mkdir(filepath.Join(rootDir, aliasesDirName), 0755)
-				ioutil.WriteFile(filepath.Join(rootDir, bundlesFileName), []byte(`[]`), 0644)
+				os.Mkdir(filepath.Join(rootDir, consts.ExtensionsDirName), 0755)
+				os.Mkdir(filepath.Join(rootDir, consts.AliasesDirName), 0755)
+				ioutil.WriteFile(filepath.Join(rootDir, consts.BundlesFileName), []byte(`[]`), 0644)
 			} else {
 				return
 			}
@@ -78,7 +70,7 @@ var setupCmd = &cobra.Command{
 
 		enableTLS := userConfirm("Enable TLS?")
 
-		fmt.Printf(Info+"Generating default configuration: %s\n", filepath.Join(rootDir, configFileName))
+		fmt.Printf(Info+"Generating default configuration: %s\n", filepath.Join(rootDir, consts.ConfigFileName))
 		public, private, err := minisign.GenerateKey(rand.Reader)
 		if err != nil {
 			fmt.Printf(Warn+"Failed to generate public/private key(s): %s\n", err)
@@ -104,7 +96,7 @@ var setupCmd = &cobra.Command{
 			ReadTimeout:              time.Duration(5 * time.Minute),
 		}
 		serverConfigData, _ := json.MarshalIndent(serverConfig, "", "  ")
-		ioutil.WriteFile(filepath.Join(rootDir, configFileName), serverConfigData, 0644)
+		ioutil.WriteFile(filepath.Join(rootDir, consts.ConfigFileName), serverConfigData, 0644)
 
 		fmt.Println()
 		userConfig, _ := json.MarshalIndent(&ArmoryClientConfig{
@@ -144,7 +136,7 @@ func getRootDir(cmd *cobra.Command) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		rootDir = filepath.Join(cwd, armoryRootDirName)
+		rootDir = filepath.Join(cwd, consts.ArmoryRootDirName)
 	}
 	return rootDir, nil
 }

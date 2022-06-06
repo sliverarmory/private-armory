@@ -23,9 +23,11 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"time"
 
 	"github.com/sliverarmory/external-armory/api"
+	"github.com/sliverarmory/external-armory/consts"
 	"github.com/sliverarmory/external-armory/log"
 	"github.com/spf13/cobra"
 )
@@ -66,7 +68,7 @@ const (
 	Debug = Bold + Purple + "[-] " + Normal
 	// Woot - Display success
 	Woot = Bold + Green + "[$] " + Normal
-	// Success - Diplay success
+	// Success - Display success
 	Success = Bold + Green + "[+] " + Normal
 )
 
@@ -101,6 +103,16 @@ var rootCmd = &cobra.Command{
 			log.GetAccessLogger(serverConfig.RootDir),
 		)
 		appLog.Infof("Starting with root dir: %s", serverConfig.RootDir)
+
+		if _, err := os.Stat(filepath.Join(serverConfig.RootDir, consts.ArmoryIndexFileName)); os.IsNotExist(err) {
+			appLog.Warnf("Missing armory index, will attempt to refresh ...")
+			success, data := refreshArmoryIndex(serverConfig, appLog)
+			if !success {
+				os.Exit(2)
+			}
+			signArmoryIndex(data, serverConfig, appLog)
+		}
+
 		go func() {
 			var err error
 			if server.ArmoryServerConfig.TLSEnabled {

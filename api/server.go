@@ -24,13 +24,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
+	"github.com/sliverarmory/external-armory/consts"
 )
 
 // ArmoryServer - The armory server object
@@ -140,7 +144,8 @@ func New(config *ArmoryServerConfig, app *logrus.Logger, access *logrus.Logger) 
 	}
 	armoryRouter.Use(server.versionHeaderMiddleware)
 
-	armoryRouter.HandleFunc("/index", server.IndexHandler).Methods(http.MethodGet)
+	armoryRouter.HandleFunc("/index.json", server.IndexHandler).Methods(http.MethodGet)
+	armoryRouter.HandleFunc("/index.minisig", server.IndexHandler).Methods(http.MethodGet)
 	armoryRouter.HandleFunc("/aliases", server.AliasesHandler).Methods(http.MethodGet)
 	armoryRouter.HandleFunc("/extensions", server.ExtensionsHandler).Methods(http.MethodGet)
 
@@ -172,14 +177,34 @@ func (jsonNotFoundHandler) ServeHTTP(resp http.ResponseWriter, req *http.Request
 
 // IndexHandler - Returns the index of extensions, aliases, and bundles
 func (s *ArmoryServer) IndexHandler(resp http.ResponseWriter, req *http.Request) {
-	resp.Header().Set("Content-Type", "application/json")
-	data, err := json.Marshal("{}")
-	if err != nil {
-		s.jsonError(resp, err)
-		return
+	var data []byte
+	if strings.HasSuffix(req.URL.Path, ".json") {
+		data = s.getIndexJSON()
+	} else {
+		data = s.getIndexMinisig()
 	}
 	resp.WriteHeader(http.StatusOK)
 	resp.Write(data)
+}
+
+func (s *ArmoryServer) getIndexJSON() []byte {
+	indexPath := filepath.Join(s.ArmoryServerConfig.RootDir, consts.ArmoryIndexFileName)
+	data, err := ioutil.ReadFile(indexPath)
+	if err != nil {
+		s.AppLog.Errorf("Error reading index: %s", err)
+		return []byte{}
+	}
+	return data
+}
+
+func (s *ArmoryServer) getIndexMinisig() []byte {
+	indexSigPath := filepath.Join(s.ArmoryServerConfig.RootDir, consts.ArmoryIndexSigFileName)
+	data, err := ioutil.ReadFile(indexSigPath)
+	if err != nil {
+		s.AppLog.Errorf("Error reading index: %s", err)
+		return []byte{}
+	}
+	return data
 }
 
 // AliasesHandler - Returns alias tars and minisigs

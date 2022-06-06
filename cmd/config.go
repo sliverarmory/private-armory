@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 
 	"github.com/sliverarmory/external-armory/api"
+	"github.com/sliverarmory/external-armory/consts"
 	"github.com/spf13/cobra"
 )
 
@@ -48,7 +49,7 @@ func getServerConfig(cmd *cobra.Command) *api.ArmoryServerConfig {
 	}
 	if configPath == "" {
 		cwd, _ := os.Getwd()
-		configPath = filepath.Join(cwd, armoryRootDirName, configFileName)
+		configPath = filepath.Join(cwd, consts.ArmoryRootDirName, consts.ConfigFileName)
 	}
 	configData, err := ioutil.ReadFile(configPath)
 	if err != nil {
