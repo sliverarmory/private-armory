@@ -24,7 +24,9 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path"
 	"path/filepath"
+	"time"
 
 	"aead.dev/minisign"
 	"github.com/AlecAivazis/survey/v2"
@@ -98,6 +100,8 @@ var setupCmd = &cobra.Command{
 			AuthorizationTokenDigest: tokenDigest,
 			PublicKey:                public.String(),
 			TLSEnabled:               enableTLS,
+			WriteTimeout:             time.Duration(5 * time.Minute),
+			ReadTimeout:              time.Duration(5 * time.Minute),
 		}
 		serverConfigData, _ := json.MarshalIndent(serverConfig, "", "  ")
 		ioutil.WriteFile(filepath.Join(rootDir, configFileName), serverConfigData, 0644)
@@ -105,7 +109,7 @@ var setupCmd = &cobra.Command{
 		fmt.Println()
 		userConfig, _ := json.MarshalIndent(&ArmoryClientConfig{
 			PublicKey:     public.String(),
-			RepoURL:       serverConfig.RepoURL(),
+			RepoURL:       serverConfig.RepoURL() + "/" + path.Join("armory", "index"),
 			Authorization: token,
 		}, "", "    ")
 		fmt.Printf(Bold + "*** THIS WILL ONLY BE SHOWN ONCE ***\n")
@@ -114,10 +118,11 @@ var setupCmd = &cobra.Command{
 }
 
 func userPassword() string {
-	password := ""
-	prompt := &survey.Password{
-		Message: "Encrypt private key with password:",
+	if os.Getenv("ARMORY_BLANK_PASSWORD") == "1" {
+		return ""
 	}
+	password := ""
+	prompt := &survey.Password{Message: "Private key password:"}
 	survey.AskOne(prompt, &password)
 	return password
 }

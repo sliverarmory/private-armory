@@ -20,6 +20,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -47,6 +48,7 @@ var refreshCmd = &cobra.Command{
 		}
 
 		appLog := log.GetAppLogger(serverConfig.RootDir)
+		fmt.Printf(Info + "Refreshing armory index ...\n")
 		index, err := generateArmoryIndex(serverConfig.RootDir)
 		if err != nil {
 			appLog.Errorf("Failed to generate armory index: %s", err)
@@ -62,6 +64,7 @@ var refreshCmd = &cobra.Command{
 			appLog.Errorf("Failed to write armory index: %s", err)
 			return
 		}
+		fmt.Printf(Info + "Signing armory index ...\n")
 		password := userPassword()
 		privateKey, err := minisign.PrivateKeyFromFile(password, filepath.Join(serverConfig.RootDir, privateKeyFileName))
 		if err != nil {
@@ -74,6 +77,7 @@ var refreshCmd = &cobra.Command{
 			appLog.Errorf("Failed to write armory index signature: %s", err)
 			return
 		}
+		fmt.Printf(Info + "Successfully refreshed armory index.\n")
 	},
 }
 

@@ -20,6 +20,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"time"
@@ -91,6 +92,7 @@ var rootCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		serverConfig := getServerConfig(cmd)
 		if serverConfig == nil {
+			fmt.Printf(Warn + "Failed to find a server config, run setup to generate a default config")
 			return
 		}
 		appLog := log.GetAppLogger(serverConfig.RootDir)
@@ -114,6 +116,7 @@ var rootCmd = &cobra.Command{
 				err = server.HTTPServer.ListenAndServe()
 			}
 			if err != nil {
+				appLog.Errorf("Listener error: %s", err)
 				os.Exit(1)
 			}
 		}()

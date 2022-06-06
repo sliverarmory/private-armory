@@ -51,10 +51,10 @@ type ArmoryServerConfig struct {
 	TLSCertificate string `json:"tls_certificate"`
 	TLSKey         string `json:"tls_key"`
 
-	RootDir    string `json:"root_dir"`
-	PublicKey  string `json:"public_key"`
-	PrivateKey string `json:"private_key"`
+	RootDir   string `json:"root_dir"`
+	PublicKey string `json:"public_key"`
 
+	AuthenticationDisabled   bool   `json:"authentication_disabled"`
 	AuthorizationTokenDigest string `json:"authorization_token_digest"`
 
 	WriteTimeout time.Duration `json:"write_timeout"`
@@ -72,7 +72,7 @@ func (c *ArmoryServerConfig) RepoURL() string {
 	if host == "" {
 		host = c.getOutboundIP()
 	}
-	repoURL, err := url.Parse(scheme + "://" + host)
+	repoURL, err := url.Parse(fmt.Sprintf("%s://%s:%d", scheme, host, c.ListenPort))
 	if err != nil {
 		return ""
 	}
@@ -132,8 +132,11 @@ func New(config *ArmoryServerConfig, app *logrus.Logger, access *logrus.Logger) 
 
 	// Armory Handlers
 	armoryRouter := router.PathPrefix("/armory").Subrouter()
-	if server.ArmoryServerConfig.AuthorizationTokenDigest != "" {
+	if !server.ArmoryServerConfig.AuthenticationDisabled {
+		server.AppLog.Infof("Authentication is enabled")
 		armoryRouter.Use(server.authorizationTokenMiddleware)
+	} else {
+		server.AppLog.Infof("Authentication is disabled")
 	}
 	armoryRouter.Use(server.versionHeaderMiddleware)
 
@@ -164,7 +167,6 @@ type jsonNotFoundHandler struct{}
 
 func (jsonNotFoundHandler) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	resp.WriteHeader(http.StatusNotFound)
-	resp.Header().Set("Content-Type", "application/json")
 	resp.Write([]byte{})
 }
 
@@ -211,7 +213,7 @@ func (s *ArmoryServer) ExtensionsHandler(resp http.ResponseWriter, req *http.Req
 func (s *ArmoryServer) authorizationTokenMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) {
 		authHeaderDigest := sha256.Sum256([]byte(req.Header.Get("Authorization")))
-		if string(authHeaderDigest[:]) == s.ArmoryServerConfig.AuthorizationTokenDigest {
+		if fmt.Sprintf("%x", authHeaderDigest[:]) == s.ArmoryServerConfig.AuthorizationTokenDigest {
 			next.ServeHTTP(resp, req)
 		} else {
 			s.jsonForbidden(resp, errors.New("user is not authenticated"))
@@ -263,8 +265,6 @@ func (s *ArmoryServer) jsonError(resp http.ResponseWriter, err error) {
 
 func (s *ArmoryServer) jsonForbidden(resp http.ResponseWriter, err error) {
 	resp.WriteHeader(http.StatusForbidden)
-	resp.Header().Set("Content-Type", "application/json")
-	data, _ := json.Marshal(JSONError{Error: err.Error()})
 	s.AppLog.Error(err)
-	resp.Write(data)
+	resp.Write([]byte{})
 }

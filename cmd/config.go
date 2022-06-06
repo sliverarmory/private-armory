@@ -62,13 +62,14 @@ func getServerConfig(cmd *cobra.Command) *api.ArmoryServerConfig {
 	}
 
 	// CLI flags override config file
-
-	disableAuth, err := cmd.Flags().GetBool(disableAuthFlagStr)
-	if err != nil {
-		fmt.Printf("Error parsing flag --%s, %s\n", disableAuthFlagStr, err)
-		return nil
+	if cmd.Flags().Changed(disableAuthFlagStr) {
+		serverConfig.AuthenticationDisabled, err = cmd.Flags().GetBool(disableAuthFlagStr)
+		if err != nil {
+			fmt.Printf("Error parsing flag --%s, %s\n", disableAuthFlagStr, err)
+			return nil
+		}
 	}
-	if !disableAuth && serverConfig.AuthorizationTokenDigest == "" {
+	if !serverConfig.AuthenticationDisabled && serverConfig.AuthorizationTokenDigest == "" {
 		fmt.Printf("Error cannot have blank authorization token, use --%s\n", disableAuthFlagStr)
 		return nil
 	}
