@@ -1,18 +1,21 @@
-FROM alpine:3.16
+# Use the official golang alpine image
+FROM golang:alpine3.19
 
-COPY --from=golang:1.18-alpine /usr/local/go/ /usr/local/go/
 RUN apk add --no-cache make
 
-RUN mkdir -p /tmp/external-armory \
-    && mkdir -p /data
+# Create a build environment
+RUN mkdir -p /tmp/external-armory
 ADD . /tmp/external-armory
 WORKDIR /tmp/external-armory
-RUN GOOS=linux make .
-WORKDIR /opt
+RUN GOOS=linux make external-armory
+RUN cp external-armory /opt
 
 # Cleanup
 RUN rm -rf /tmp/external-armory \
     && rm -rf /usr/local/go
 
-VOLUME [ "/data/armory-root" ]
+WORKDIR /data
+
+VOLUME [ "/data/armory-data" ]
+
 ENTRYPOINT [ "/opt/external-armory" ]

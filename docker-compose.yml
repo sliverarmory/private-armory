@@ -1,9 +1,16 @@
 version: "3.9"
 
 services:
-  web:
+  armory:
     build: .
     ports:
       - "8888:8888"
     volumes:
-      - ./armory-root:/data/armory-root:ro
+      - ./armory-data:/data/armory-data:rw
+      # Uncomment the next two lines if you want to enable TLS
+      #- ./armory.key:/data/armory-data/certificates/armory.key
+      #- ./armory.crt:/data/armory-data/certificates/armory.crt
+      # Uncomment this line if you are using TLS and Vault with a custom CA
+      #- ./armory-vault-ca.pem:/data/armory-data/certificates/armory-vault-ca.pem
+    env_file:
+      - ./armory.env

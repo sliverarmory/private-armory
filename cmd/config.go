@@ -23,9 +23,9 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/sliverarmory/external-armory/api"
 	"github.com/sliverarmory/external-armory/consts"
@@ -40,62 +40,195 @@ type ArmoryClientConfig struct {
 	AuthorizationCmd string `json:"authorization_cmd,omitempty"`
 }
 
-func getServerConfig(cmd *cobra.Command) *api.ArmoryServerConfig {
-	serverConfig := &api.ArmoryServerConfig{}
-	configPath, err := cmd.Flags().GetString(configFlagStr)
-	if err != nil {
-		fmt.Printf("Error parsing flag --%s, %s\n", configFlagStr, err)
+func getServerConfig(cmd *cobra.Command) error {
+	// We only need to pull configuration information if we do not currently have a config
+	if runningServerConfig != nil {
 		return nil
+	}
+
+	var err error
+
+	// Keep track of the flags that we need to get from the environment or ask the user for
+	flagsChanged := []string{}
+
+	// Populate with defaults that can be changed by a config file or at the command line
+	runningServerConfig = &api.ArmoryServerConfig{
+		ListenPort:                consts.DefaultListenPort,
+		TLSEnabled:                false,
+		AuthenticationDisabled:    true,
+		AuthorizationTokenDigest:  "",
+		ReadTimeout:               time.Duration(5 * time.Minute),
+		WriteTimeout:              time.Duration(5 * time.Minute),
+		SigningKey:                nil,
+		SigningKeyProviderDetails: api.SigningKeyProviderInfo{},
+	}
+	runningServerConfig.RootDir, err = getRootDir(cmd)
+	if err != nil {
+		return fmt.Errorf("could not determine root directory and start the server: %s", err)
+	}
+	configPath, err := cmd.Flags().GetString(consts.ConfigFlagStr)
+	if err != nil {
+		return fmt.Errorf("error parsing flag --%s, %s", consts.ConfigFlagStr, err)
 	}
 	if configPath == "" {
 		cwd, _ := os.Getwd()
 		configPath = filepath.Join(cwd, consts.ArmoryRootDirName, consts.ConfigFileName)
+		if runningServerConfig.RootDir == "" {
+			runningServerConfig.RootDir = filepath.Join(cwd, consts.ArmoryRootDirName)
+		}
 	}
-	configData, err := ioutil.ReadFile(configPath)
+	configData, err := os.ReadFile(configPath)
 	if err != nil {
-		fmt.Printf("Error reading config file %s, %s\n", configPath, err)
-		return nil
+		if os.IsNotExist(err) {
+			fmt.Printf(Warn+"Config file %s does not exist\n", configPath)
+		} else {
+			fmt.Printf("Error reading config file %s, %s\n", configPath, err)
+		}
+		// Could not read a config file on disk for whatever reason, so we will use defaults and let CLI args override
+		fmt.Println("Using default configuration and allowing command arguments to override")
+	} else {
+		err = json.Unmarshal(configData, runningServerConfig)
+		if err != nil {
+			// Something was wrong with the config file, the user will have to fix it or re-run setup
+			return fmt.Errorf("error parsing config file %s, %s", configPath, err)
+		}
 	}
-	err = json.Unmarshal(configData, serverConfig)
-	if err != nil {
-		fmt.Printf("Error parsing config file %s, %s\n", configPath, err)
-		return nil
+	// We need to check some CLI arguments in case setup needs to be run
+	// For the next two, the signing key provider will be filled in once the details are verified (and a key is retrieved)
+	if cmd.Flags().Changed(consts.AWSSigningKeySecretNameFlagStr) {
+		awsConfigDetails := api.SigningKeyProviderInfo{}
+
+		secretName, err := cmd.Flags().GetString(consts.AWSSigningKeySecretNameFlagStr)
+		if err != nil {
+			return fmt.Errorf("error parsing flag --%s, %s", consts.AWSSigningKeySecretNameFlagStr, err)
+		}
+		region, err := cmd.Flags().GetString(consts.AWSRegionFlagStr)
+		if err != nil {
+			return fmt.Errorf("error parsing flag --%s, %s", consts.AWSRegionFlagStr, err)
+		}
+
+		awsConfigDetails[consts.AWSSecretNameKey] = secretName
+		awsConfigDetails[consts.AWSRegionKey] = region
+		runningServerConfig.SigningKeyProviderDetails = awsConfigDetails
+	}
+
+	if cmd.Flags().Changed(consts.VaultURLFlagStr) {
+		vaultConfigDetails := api.SigningKeyProviderInfo{}
+
+		vaultURL, err := cmd.Flags().GetString(consts.VaultURLFlagStr)
+		if err != nil {
+			return fmt.Errorf("error parsing flag --%s, %s", consts.VaultURLFlagStr, err)
+		}
+		vaultConfigDetails[consts.VaultAddrKey] = vaultURL
+
+		vaultApprolePath, err := cmd.Flags().GetString(consts.VaultAppRolePathFlagStr)
+		if err != nil {
+			return fmt.Errorf("error parsing flag --%s, %s", consts.VaultAppRolePathFlagStr, err)
+		}
+		vaultConfigDetails[consts.VaultAppRolePathKey] = vaultApprolePath
+
+		vaultRoleID, err := cmd.Flags().GetString(consts.VaultRoleIDFlagStr)
+		if err != nil {
+			return fmt.Errorf("error parsing flag --%s, %s", consts.VaultRoleIDFlagStr, err)
+		}
+		vaultConfigDetails[consts.VaultAppRoleIDKey] = vaultRoleID
+
+		vaultSecretID, err := cmd.Flags().GetString(consts.VaultSecretIDFlagStr)
+		if err != nil {
+			return fmt.Errorf("error parsing flag --%s, %s", consts.VaultSecretIDFlagStr, err)
+		}
+		vaultConfigDetails[consts.VaultAppSecretIDKey] = vaultSecretID
+
+		vaultPath, err := cmd.Flags().GetString(consts.VaultKeyPathFlagStr)
+		if err != nil {
+			return fmt.Errorf("error parsing flag --%s, %s", consts.VaultKeyPathFlagStr, err)
+		}
+		vaultConfigDetails[consts.VaultKeyPathKey] = vaultPath
+
+		runningServerConfig.SigningKeyProviderDetails = vaultConfigDetails
 	}
 
 	// CLI flags override config file
-	if cmd.Flags().Changed(disableAuthFlagStr) {
-		serverConfig.AuthenticationDisabled, err = cmd.Flags().GetBool(disableAuthFlagStr)
+	if cmd.Flags().Changed(consts.DomainFlagStr) {
+		runningServerConfig.DomainName, err = cmd.Flags().GetString(consts.DomainFlagStr)
 		if err != nil {
-			fmt.Printf("Error parsing flag --%s, %s\n", disableAuthFlagStr, err)
-			return nil
+			return fmt.Errorf("error parsing flag --%s, %s", consts.DomainFlagStr, err)
 		}
+		flagsChanged = append(flagsChanged, consts.DomainFlagStr)
 	}
-	if !serverConfig.AuthenticationDisabled && serverConfig.AuthorizationTokenDigest == "" {
-		fmt.Printf("Error cannot have blank authorization token, use --%s\n", disableAuthFlagStr)
-		return nil
+	if cmd.Flags().Changed(consts.DisableAuthFlagStr) {
+		runningServerConfig.AuthenticationDisabled, err = cmd.Flags().GetBool(consts.DisableAuthFlagStr)
+		if err != nil {
+			return fmt.Errorf("error parsing flag --%s, %s", consts.DisableAuthFlagStr, err)
+		}
+		flagsChanged = append(flagsChanged, consts.DisableAuthFlagStr)
+	}
+	if !runningServerConfig.AuthenticationDisabled && runningServerConfig.AuthorizationTokenDigest == "" {
+		return fmt.Errorf("error cannot have blank authorization token, use --%s", consts.DisableAuthFlagStr)
 	}
 
-	if cmd.Flags().Changed(lhostFlagStr) {
-		serverConfig.ListenHost, err = cmd.Flags().GetString(lhostFlagStr)
+	if cmd.Flags().Changed(consts.LhostFlagStr) {
+		runningServerConfig.ListenHost, err = cmd.Flags().GetString(consts.LhostFlagStr)
 		if err != nil {
-			fmt.Printf("Error parsing flag --%s, %s\n", lhostFlagStr, err)
-			return nil
+			return fmt.Errorf("error parsing flag --%s, %s", consts.LhostFlagStr, err)
 		}
+		flagsChanged = append(flagsChanged, consts.LhostFlagStr)
+	}
+
+	if cmd.Flags().Changed(consts.LportFlagStr) {
+		runningServerConfig.ListenPort, err = cmd.Flags().GetUint16(consts.LportFlagStr)
+		if err != nil {
+			return fmt.Errorf("error parsing flag --%s, %s", consts.LportFlagStr, err)
+		}
+		flagsChanged = append(flagsChanged, consts.LportFlagStr)
+	}
+
+	if cmd.Flags().Changed(consts.ReadTimeoutFlagStr) {
+		readTimeoutStr, err := cmd.Flags().GetString(consts.ReadTimeoutFlagStr)
+		if err != nil {
+			return fmt.Errorf("error parsing flag --%s, %s", consts.ReadTimeoutFlagStr, err)
+		}
+		readTimeout, err := time.ParseDuration(readTimeoutStr)
+		if err != nil {
+			return fmt.Errorf("invalid read timeout %q", readTimeoutStr)
+		}
+		runningServerConfig.ReadTimeout = readTimeout
+		flagsChanged = append(flagsChanged, consts.ReadTimeoutFlagStr)
+	}
+
+	if cmd.Flags().Changed(consts.WriteTimeoutFlagStr) {
+		writeTimeoutStr, err := cmd.Flags().GetString(consts.WriteTimeoutFlagStr)
+		if err != nil {
+			return fmt.Errorf("error parsing flag --%s, %s", consts.WriteTimeoutFlagStr, err)
+		}
+		writeTimeout, err := time.ParseDuration(writeTimeoutStr)
+		if err != nil {
+			return fmt.Errorf("invalid write timeout %q", writeTimeoutStr)
+		}
+		runningServerConfig.WriteTimeout = writeTimeout
+		flagsChanged = append(flagsChanged, consts.WriteTimeoutFlagStr)
+	}
+
+	// At this point, we should know where the root dir is
+	// If the necessary directories are not setup, then we need to run setup
+	if !checkApplicationDirectories(runningServerConfig.RootDir) {
+		err = runSetup(flagsChanged)
+		if err != nil {
+			// Remove the directories we created
+			folderErr := os.RemoveAll(runningServerConfig.RootDir)
+			if folderErr != nil {
+				fmt.Printf("%s could not delete application directory %s: %s\n", Warn, runningServerConfig.RootDir, folderErr)
+			}
+			runningServerConfig = nil
+		}
+		// Anything that would be overriden with the CLI has already been asked, so we are done
+		return err
 	} else {
-		serverConfig.ListenHost = ""
+		// This armory has been setup before, so we need to get the signing key
+		getAndStoreSigningKey()
 	}
 
-	if cmd.Flags().Changed(lportFlagStr) {
-		serverConfig.ListenPort, err = cmd.Flags().GetUint16(lportFlagStr)
-		if err != nil {
-			fmt.Printf("Error parsing flag --%s, %s\n", lportFlagStr, err)
-			return nil
-		}
-	} else {
-		serverConfig.ListenPort = 8888
-	}
-
-	return serverConfig
+	return nil
 }
 
 func randomAuthorizationToken() (string, string) {

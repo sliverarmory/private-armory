@@ -26,23 +26,14 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/sliverarmory/external-armory/api"
 	"github.com/sliverarmory/external-armory/consts"
 	"github.com/sliverarmory/external-armory/log"
 	"github.com/spf13/cobra"
 )
 
-const (
-	lhostFlagStr        = "lhost"
-	lportFlagStr        = "lport"
-	configFlagStr       = "config"
-	writeTimeoutFlagStr = "write-timeout"
-	readTimeoutFlagStr  = "read-timeout"
-	disableAuthFlagStr  = "disable-authentication"
-	refreshFlagStr      = "refresh"
-
-	rootDirFlagStr = "root-dir"
-)
+var runningServerConfig *api.ArmoryServerConfig = nil
 
 const (
 	// ANSI Colors
@@ -74,19 +65,29 @@ const (
 )
 
 func init() {
-	rootCmd.PersistentFlags().StringP(configFlagStr, "c", "", "Config file path")
+	rootCmd.PersistentFlags().StringP(consts.ConfigFlagStr, "c", "", "Config file path")
 
-	rootCmd.Flags().BoolP(disableAuthFlagStr, "A", false, "Disable authentication token checks")
-	rootCmd.Flags().StringP(lhostFlagStr, "l", "", "Listen host")
-	rootCmd.Flags().Uint16P(lportFlagStr, "p", 8888, "Listen port")
-	rootCmd.Flags().StringP(readTimeoutFlagStr, "R", "1m", "HTTP read timeout")
-	rootCmd.Flags().StringP(writeTimeoutFlagStr, "W", "1m", "HTTP write timeout")
-	rootCmd.Flags().BoolP(refreshFlagStr, "r", false, "Force refresh of armory index (may require password input)")
+	rootCmd.Flags().BoolP(consts.DisableAuthFlagStr, "A", false, "Disable authentication token checks")
+	rootCmd.Flags().StringP(consts.LhostFlagStr, "l", "", "Listen host")
+	rootCmd.Flags().Uint16P(consts.LportFlagStr, "p", 8888, "Listen port")
+	rootCmd.Flags().StringP(consts.ReadTimeoutFlagStr, "R", "1m", "HTTP read timeout expressed as a duration")
+	rootCmd.Flags().StringP(consts.WriteTimeoutFlagStr, "W", "1m", "HTTP write timeout expressed as a duration")
+	rootCmd.Flags().BoolP(consts.RefreshFlagStr, "r", false, "Force refresh of armory index (may require password input)")
+	rootCmd.Flags().StringP(consts.AWSSigningKeySecretNameFlagStr, "a", "", "Name for the signing key if using AWS Secrets Manager")
+	rootCmd.Flags().StringP(consts.AWSRegionFlagStr, "g", "us-west-2", "AWS region if using Secrets Manager")
+	rootCmd.Flags().StringP(consts.VaultURLFlagStr, "u", "", "Vault location as a URL")
+	rootCmd.Flags().StringP(consts.VaultAppRolePathFlagStr, "L", "approle", "The approle path for Vault")
+	rootCmd.Flags().StringP(consts.VaultRoleIDFlagStr, "i", "", "The GUID for the approle role ID in Vault")
+	rootCmd.Flags().StringP(consts.VaultSecretIDFlagStr, "s", "", "The GUID for the approle secret ID in Vault")
+	rootCmd.Flags().StringP(consts.VaultKeyPathFlagStr, "P", "", "The path to the signing key in Vault, including the field")
+	rootCmd.Flags().StringP(consts.DomainFlagStr, "m", "", "The domain name or IP address that clients will use to connect to the armory")
+	rootCmd.Flags().BoolP(consts.EnableTLSFlagStr, "t", false, "Enable TLS for the armory (certificates must be placed in <armory-root>/certificates, see documentation)")
+	rootCmd.Flags().StringP(consts.RootDirFlagStr, "d", "", "Root armory directory (must be writable)")
 
-	rootCmd.AddCommand(setupCmd)
-	setupCmd.Flags().StringP("root-dir", "R", "", "Root armory directory (must be writable)")
+	genSignatureCmd.Flags().StringP("file", "f", "", "Path to output key")
 
 	rootCmd.AddCommand(refreshCmd)
+	rootCmd.AddCommand(genSignatureCmd)
 }
 
 var rootCmd = &cobra.Command{
@@ -94,54 +95,103 @@ var rootCmd = &cobra.Command{
 	Short: "Sliver armory server",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
-		serverConfig := getServerConfig(cmd)
-		if serverConfig == nil {
-			fmt.Printf(Warn + "Failed to find a server config, run setup to generate a default config")
-			return
-		}
-		appLog := log.GetAppLogger(serverConfig.RootDir)
-		server := api.New(serverConfig,
-			appLog,
-			log.GetAccessLogger(serverConfig.RootDir),
-		)
-		appLog.Infof("Starting with root dir: %s", serverConfig.RootDir)
-
-		forceRefresh, err := cmd.Flags().GetBool(refreshFlagStr)
+		err := getServerConfig(cmd)
 		if err != nil {
-			fmt.Printf("Error parsing flag --%s, %s\n", refreshFlagStr, err)
+			fmt.Printf("%s\n", err)
+			return
+		}
+		appLog := log.GetAppLogger(runningServerConfig.RootDir)
+		server := api.New(runningServerConfig,
+			appLog,
+			log.GetAccessLogger(runningServerConfig.RootDir),
+		)
+		appLog.Infof("Starting with root dir: %s", runningServerConfig.RootDir)
+
+		forceRefresh, err := cmd.Flags().GetBool(consts.RefreshFlagStr)
+		if err != nil {
+			fmt.Printf("Error parsing flag --%s, %s\n", consts.RefreshFlagStr, err)
 			return
 		}
 
-		if _, err := os.Stat(filepath.Join(serverConfig.RootDir, consts.ArmoryIndexFileName)); os.IsNotExist(err) || forceRefresh {
+		if _, err := os.Stat(filepath.Join(runningServerConfig.RootDir, consts.ArmoryIndexFileName)); os.IsNotExist(err) || forceRefresh {
 			if !forceRefresh {
 				appLog.Warnf("Armory index not found %s, will attempt to refresh ...",
-					filepath.Join(serverConfig.RootDir, consts.ArmoryIndexFileName),
+					filepath.Join(runningServerConfig.RootDir, consts.ArmoryIndexFileName),
 				)
 			} else {
 				appLog.Infof("Forcing refresh of armory index ...")
 			}
-			success := refreshArmoryIndex(serverConfig, appLog)
+			success := refreshArmoryIndex(appLog)
 			if !success {
 				os.Exit(2)
+			}
+		}
+
+		// Watcher
+		packageWatcher, err := fsnotify.NewWatcher()
+		enableWatcher := true
+		if err != nil {
+			appLog.Errorf("Could not initialize package watcher. Packages will have to be refreshed manually")
+			enableWatcher = false
+		}
+
+		if enableWatcher {
+			defer packageWatcher.Close()
+			go func() {
+				for {
+					select {
+					case event, ok := <-packageWatcher.Events:
+						if !ok {
+							return
+						}
+						if event.Has(fsnotify.Create) || event.Has(fsnotify.Remove) {
+							// a file has been added or removed, so force a refresh
+							appLog.Infof("Change detected in %s, refreshing index...", filepath.Dir(event.Name))
+							refreshArmoryIndex(appLog)
+						}
+					case err, ok := <-packageWatcher.Errors:
+						if !ok {
+							return
+						}
+						appLog.Errorf("Watcher received an error: %s", err)
+					}
+				}
+			}()
+
+			err = packageWatcher.Add(filepath.Join(server.ArmoryServerConfig.RootDir, consts.AliasesDirName))
+			if err != nil {
+				appLog.Errorf("Could not watch alias dir, disabling watcher: %s", err)
+				packageWatcher.Close()
+			} else {
+				err = packageWatcher.Add(filepath.Join(server.ArmoryServerConfig.RootDir, consts.ExtensionsDirName))
+				if err != nil {
+					appLog.Errorf("Could not watch extensions dir, disabling watcher: %s", err)
+					packageWatcher.Close()
+				} else {
+					err = packageWatcher.Add(filepath.Join(server.ArmoryServerConfig.RootDir, consts.BundlesFileName))
+					if err != nil {
+						appLog.Errorf("Could not watch bundle file, disabling watcher: %s", err)
+						packageWatcher.Close()
+					}
+				}
 			}
 		}
 
 		go func() {
 			var err error
 			if server.ArmoryServerConfig.TLSEnabled {
+				certPath := filepath.Join(server.ArmoryServerConfig.RootDir, consts.TLSCertPathFromRoot)
+				keyPath := filepath.Join(server.ArmoryServerConfig.RootDir, consts.TLSKeyPathFromRoot)
 				appLog.Infof("TLS is ENABLED")
-				appLog.Debugf("TLS certificate file: %s", server.ArmoryServerConfig.TLSCertificate)
-				if _, err := os.Stat(server.ArmoryServerConfig.TLSCertificate); os.IsNotExist(err) {
-					appLog.Warnf("TLS certificate file path does not exist '%s'", server.ArmoryServerConfig.TLSCertificate)
+				appLog.Debugf("TLS certificate file: %s", certPath)
+				if _, err := os.Stat(certPath); os.IsNotExist(err) {
+					appLog.Warnf("TLS certificate file path does not exist '%s'", certPath)
 				}
-				appLog.Debugf("TLS key file: %s", server.ArmoryServerConfig.TLSKey)
-				if _, err := os.Stat(server.ArmoryServerConfig.TLSKey); os.IsNotExist(err) {
-					appLog.Warnf("TLS key file path does not exist '%s'", server.ArmoryServerConfig.TLSKey)
+				appLog.Debugf("TLS key file: %s", keyPath)
+				if _, err := os.Stat(keyPath); os.IsNotExist(err) {
+					appLog.Warnf("TLS key file path does not exist '%s'", keyPath)
 				}
-				err = server.HTTPServer.ListenAndServeTLS(
-					server.ArmoryServerConfig.TLSCertificate,
-					server.ArmoryServerConfig.TLSKey,
-				)
+				err = server.HTTPServer.ListenAndServeTLS(certPath, keyPath)
 			} else {
 				appLog.Infof("TLS is DISABLED")
 				err = server.HTTPServer.ListenAndServe()
