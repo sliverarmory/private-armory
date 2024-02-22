@@ -21,103 +21,453 @@ package cmd
 import (
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
+	"math"
 	"os"
 	"path"
 	"path/filepath"
-	"time"
+	"slices"
+	"strconv"
+	"strings"
 
 	"aead.dev/minisign"
 	"github.com/AlecAivazis/survey/v2"
-	"github.com/sliverarmory/external-armory/api"
 	"github.com/sliverarmory/external-armory/consts"
 	"github.com/spf13/cobra"
 )
 
-const (
-	privateKeyFileName = "private.key"
+var (
+	ErrSigningKeyProviderRefused = errors.New("")
+	// An error to signal that the signing key has already been decrypted
+	ErrPackageSigningKeyDecrypted = errors.New("")
 )
 
-var setupCmd = &cobra.Command{
-	Use:   "setup",
-	Short: "Perform initial setup",
-	Long:  ``,
+var genSignatureCmd = &cobra.Command{
+	Use:   "genkey",
+	Short: "Generate a package signing key",
 	Run: func(cmd *cobra.Command, args []string) {
-		rootDir, err := getRootDir(cmd)
-		if err != nil {
-			fmt.Printf(Warn+"%s\n", err)
-			return
-		}
-		if _, err := os.Stat(rootDir); os.IsNotExist(err) {
-			fmt.Printf(Info+"Root directory '%s' does not exist!\n", rootDir)
-			if userConfirm(fmt.Sprintf("Create root directory '%s' ?", rootDir)) {
-				err = os.Mkdir(rootDir, 0755)
-				if err != nil {
-					fmt.Printf(Warn+"Error failed to create '%s' %s\n", rootDir, err)
-					return
-				}
-				os.Mkdir(filepath.Join(rootDir, consts.ExtensionsDirName), 0755)
-				os.Mkdir(filepath.Join(rootDir, consts.AliasesDirName), 0755)
-				os.Mkdir(filepath.Join(rootDir, consts.SignaturesDirName), 0755)
-				ioutil.WriteFile(filepath.Join(rootDir, consts.BundlesFileName), []byte(`[]`), 0644)
-			} else {
-				return
-			}
-		}
-
-		domain := ""
-		survey.AskOne(&survey.Input{Message: "Domain name (or blank):"}, &domain)
-
-		enableTLS := userConfirm("Enable TLS?")
-
-		fmt.Printf(Info+"Generating default configuration: %s\n", filepath.Join(rootDir, consts.ConfigFileName))
+		// All signing keys generated this way will be generated with a blank password
 		public, private, err := minisign.GenerateKey(rand.Reader)
 		if err != nil {
-			fmt.Printf(Warn+"Failed to generate public/private key(s): %s\n", err)
+			fmt.Printf(Warn+"failed to generate public/private key(s): %s", err)
 			return
 		}
-		password := userPassword()
-		encryptedPrivateKey, err := minisign.EncryptKey(password, private)
+		encryptedPrivateKey, err := minisign.EncryptKey("", private)
 		if err != nil {
-			fmt.Printf("Failed to encrypt private key: %s\n", err)
+			fmt.Printf(Warn+"failed to generate public/private key(s): %s", err)
 			return
 		}
-		ioutil.WriteFile(filepath.Join(rootDir, privateKeyFileName), encryptedPrivateKey, 0644)
-		token, tokenDigest := randomAuthorizationToken()
-		serverConfig := &api.ArmoryServerConfig{
-			DomainName:               domain,
-			ListenHost:               "",
-			ListenPort:               8888,
-			RootDir:                  rootDir,
-			AuthorizationTokenDigest: tokenDigest,
-			PublicKey:                public.String(),
-			TLSEnabled:               enableTLS,
-			WriteTimeout:             time.Duration(5 * time.Minute),
-			ReadTimeout:              time.Duration(5 * time.Minute),
+		fileName, err := cmd.Flags().GetString("file")
+		if err != nil {
+			fmt.Printf("%s error parsing flag --file, %s\n", Warn, err)
+			return
 		}
-		serverConfigData, _ := json.MarshalIndent(serverConfig, "", "  ")
-		ioutil.WriteFile(filepath.Join(rootDir, consts.ConfigFileName), serverConfigData, 0644)
-
-		fmt.Println()
-		userConfig, _ := json.MarshalIndent(&ArmoryClientConfig{
-			PublicKey:     public.String(),
-			RepoURL:       serverConfig.RepoURL() + "/" + path.Join("armory", "index"),
-			Authorization: token,
-		}, "", "    ")
-		fmt.Printf(Bold + "*** THIS WILL ONLY BE SHOWN ONCE ***\n")
-		fmt.Printf(Bold+">>> User Config:%s\n%s\n", Normal, userConfig)
+		if fileName != "" {
+			err = os.WriteFile(fileName, encryptedPrivateKey, 0600)
+			if err != nil {
+				fmt.Printf("%s could not write key to %s: %s\n", Warn, fileName, err)
+				return
+			}
+			fmt.Printf("%s wrote key to %s\n", Info, fileName)
+		}
+		fmt.Println("\n" + Info + "Package signing key successfully generated:")
+		fmt.Printf("Public key:\n%s\n\n", public)
+		fmt.Printf("Private key:\n%s\n\n", string(encryptedPrivateKey))
 	},
 }
 
-func userPassword() string {
-	if os.Getenv("ARMORY_BLANK_PASSWORD") == "1" {
-		return ""
+// Gets a number from the user
+func askForNumber(prompt string, min, max, defaultValue int) (int, error) {
+	result := 0
+	resultStr := ""
+
+	numberQuestion := &survey.Question{
+		Prompt: &survey.Input{Message: prompt},
+		Validate: func(val interface{}) error {
+			valStr, ok := val.(string)
+			if !ok {
+				return fmt.Errorf("invalid input")
+			}
+			// A blank string is okay - this means the user wants the default
+			if valStr == "" {
+				return nil
+			}
+			valNum, err := strconv.Atoi(valStr)
+			if err != nil {
+				return fmt.Errorf("%s is not a valid number", valStr)
+			}
+			if valNum < min || valNum > max {
+				return fmt.Errorf("the number must be between %d and %d", min, max)
+			}
+			return nil
+		},
+	}
+
+	err := survey.Ask([]*survey.Question{numberQuestion}, &resultStr)
+
+	if err != nil {
+		fmt.Printf("user cancelled entry - using default")
+		result = defaultValue
+		err = nil
+	} else {
+		// We would not have gotten here if the validation function did not pass, so we do not need to check the error
+		if resultStr == "" {
+			return defaultValue, nil
+		} else {
+			result, _ = strconv.Atoi(resultStr)
+		}
+	}
+
+	return result, err
+}
+
+// Checks a given path to see if it is a directory, and if it is not, creates it
+// The name parameter is a descriptive name and is used for informing the user
+func checkAndCreateDirectory(name, path string) error {
+	pathInfo, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		fmt.Printf(Info+"Creating %s directory: %s\n", name, path)
+		return os.Mkdir(path, 0755)
+	}
+	if !pathInfo.IsDir() {
+		return fmt.Errorf("%s exists but is not a directory", path)
+	}
+	// Then the path exists and is a directory
+	return nil
+}
+
+// Checks if a path is a directory
+func checkDirectory(path string) bool {
+	pathInfo, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	if !pathInfo.IsDir() {
+		return false
+	}
+	return true
+}
+
+// Checks to see if the application's directories are setup
+func checkApplicationDirectories(rootDir string) bool {
+	appDirs := []string{
+		filepath.Join(rootDir, consts.ExtensionsDirName),
+		filepath.Join(rootDir, consts.AliasesDirName),
+		filepath.Join(rootDir, consts.SignaturesDirName),
+		filepath.Join(rootDir, consts.CertificatesDirName),
+	}
+
+	for _, dir := range appDirs {
+		if !checkDirectory(dir) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// Gets the listening port for the server from the user or the environment
+func getListeningPort() uint16 {
+	var err error
+
+	listenPort := consts.DefaultListenPort
+	listenPortEnv, listenPortEnvSet := os.LookupEnv(consts.PortEnvVar)
+	if !listenPortEnvSet {
+		listenPort, err = askForNumber(fmt.Sprintf("Listening port (default: %d):", consts.DefaultListenPort), 1, math.MaxUint16, consts.DefaultListenPort)
+	} else {
+		listenPort, err = strconv.Atoi(listenPortEnv)
+		if listenPort < 1 || listenPort > math.MaxUint16 || err != nil {
+			listenPort, err = askForNumber(
+				fmt.Sprintf("%s is not a valid port. Please input a different port (default: %d)", listenPortEnv, consts.DefaultListenPort),
+				1,
+				math.MaxUint16,
+				consts.DefaultListenPort,
+			)
+		}
+	}
+	if err != nil {
+		listenPort = consts.DefaultListenPort
+	}
+
+	return uint16(listenPort)
+}
+
+func getAndStoreSigningKey() error {
+	var err error
+	var signingProvider string
+
+	// Check to see if the provider was passed in as an environment variable
+	signingKeyProviderEnv, signingKeyProviderSet := os.LookupEnv(consts.SigningKeyProviderEnvVar)
+	if signingKeyProviderSet {
+		signingProvider = signingKeyProviderEnv
+	} else if runningServerConfig.SigningKeyProvider != "" {
+		signingProvider = runningServerConfig.SigningKeyProvider
+	}
+	if signingProvider != "" {
+		switch signingProvider {
+		case consts.SigningKeyProviderAWS:
+			err = getSigningKeyFromSM()
+			if err != nil {
+				// Then the user needs to fix their config, so bail
+				return fmt.Errorf("could not get package signing key from AWS: %s", err)
+			}
+		case consts.SigningKeyProviderVault:
+			err = getSigningKeyFromVault()
+			if err != nil {
+				return fmt.Errorf("could not get package signing key from Vault: %s", err)
+			}
+		default:
+			// The provider is not supported or is local, fall back to file
+			return getSigningKeyFromLocal()
+		}
+	} else {
+		// Go through each of the providers until we find the correct one
+		err = getSigningKeyFromSM()
+		if err != nil {
+			if !errors.Is(err, ErrSigningKeyProviderRefused) {
+				return fmt.Errorf("could not get package signing key from AWS: %s", err)
+			}
+		} else {
+			return err // nil
+		}
+		err = getSigningKeyFromVault()
+		if err != nil {
+			if !errors.Is(err, ErrSigningKeyProviderRefused) {
+				return fmt.Errorf("could not get package signing key from Vault: %s", err)
+			}
+		} else {
+			return err // nil
+		}
+		err = getSigningKeyFromLocal()
+	}
+	return err
+}
+
+// Runs initial setup to make sure we have everything need to run the armory
+func runSetup(flagsChanged []string) error {
+	var err error
+
+	directories := map[string]string{
+		"extensions":   filepath.Join(runningServerConfig.RootDir, consts.ExtensionsDirName),
+		"aliases":      filepath.Join(runningServerConfig.RootDir, consts.AliasesDirName),
+		"signatures":   filepath.Join(runningServerConfig.RootDir, consts.SignaturesDirName),
+		"certificates": filepath.Join(runningServerConfig.RootDir, consts.CertificatesDirName),
+	}
+	bundleFileName := filepath.Join(runningServerConfig.RootDir, consts.BundlesFileName)
+
+	// Make sure the root directory is created first if it does not exist
+	err = checkAndCreateDirectory("root", runningServerConfig.RootDir)
+	if err != nil {
+		return err
+	}
+
+	for name, dir := range directories {
+		err = checkAndCreateDirectory(name, dir)
+		if err != nil {
+			return err
+		}
+	}
+
+	fmt.Printf(Info+"Creating default bundle information file: %s\n", bundleFileName)
+	err = os.WriteFile(bundleFileName, []byte(`[]`), 0644)
+	if err != nil {
+		return err
+	}
+
+	if !slices.Contains(flagsChanged, consts.DomainFlagStr) {
+		domain, domainEnvSet := os.LookupEnv(consts.DomainEnvVar)
+		if !domainEnvSet {
+			survey.AskOne(&survey.Input{Message: "IP or domain name for clients to reach the armory (or blank for the internal IP of this host):"}, &domain)
+		} else {
+			domain = strings.Trim(domain, "\"")
+		}
+
+		runningServerConfig.DomainName = domain
+	}
+
+	if !slices.Contains(flagsChanged, consts.LportFlagStr) {
+		runningServerConfig.ListenPort = getListeningPort()
+	}
+
+	runningServerConfig.TLSEnabled = checkIfTLSEnabled()
+
+	fmt.Printf(Info+"Generating default configuration: %s\n", filepath.Join(runningServerConfig.RootDir, consts.ConfigFileName))
+
+	err = getAndStoreSigningKey()
+	if err != nil {
+		return err
+	}
+
+	token := ""
+	tokenDigest := ""
+	enableAuth := false
+
+	// This is a bit confusing, but if the disable auth flag was changed, then the user wants to disable auth
+	if !slices.Contains(flagsChanged, consts.DisableAuthFlagStr) {
+		authChoiceEnv, authEnvSet := os.LookupEnv(consts.AuthEnabledEnvVar)
+		if !authEnvSet {
+			enableAuth = userConfirm("Enable authentication?")
+		} else {
+			if authChoiceEnv == "1" {
+				enableAuth = true
+			}
+		}
+	} else {
+		enableAuth = true
+	}
+
+	if enableAuth {
+		token, tokenDigest = randomAuthorizationToken()
+	}
+	runningServerConfig.AuthenticationDisabled = !enableAuth
+	runningServerConfig.AuthorizationTokenDigest = tokenDigest
+
+	serverConfigData, _ := json.MarshalIndent(runningServerConfig, "", "  ")
+	os.WriteFile(filepath.Join(runningServerConfig.RootDir, consts.ConfigFileName), serverConfigData, 0644)
+
+	fmt.Println()
+	userConfig, _ := json.MarshalIndent(&ArmoryClientConfig{
+		PublicKey:     runningServerConfig.PublicKey,
+		RepoURL:       runningServerConfig.RepoURL() + "/" + path.Join("armory", "index"),
+		Authorization: token,
+	}, "", "    ")
+	fmt.Printf(Bold + "*** THIS WILL ONLY BE SHOWN ONCE ***\n")
+	fmt.Printf(Bold+">>> User Config:%s\n%s\n", Normal, userConfig)
+
+	return nil
+}
+
+// Convenience function for copying a file
+func copyFile(srcPath, dstPath string) (err error) {
+	inputFile, err := os.Open(srcPath)
+	if err != nil {
+		return
+	}
+	defer inputFile.Close()
+
+	outputFile, err := os.Create(dstPath)
+	if err != nil {
+		return
+	}
+	// If there is some issue closing the destination, bubble that up
+	defer func() {
+		/*
+			If there is another error waiting to be reported, then that error
+			takes precedence. If there is no error waiting to be reported,
+			then report the error from closing the file
+		*/
+		if closeErr := outputFile.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
+
+	_, err = io.Copy(outputFile, inputFile)
+	return err
+}
+
+func getPathToFileFromUser(prompt string) (string, error) {
+	filePath := ""
+
+	fileQuestion := &survey.Question{
+		Prompt: &survey.Input{Message: prompt},
+		Validate: func(val interface{}) error {
+			strValue, ok := val.(string)
+			if !ok {
+				return fmt.Errorf("invalid input")
+			}
+			srcInfo, err := os.Stat(strValue)
+			if os.IsNotExist(err) {
+				return fmt.Errorf("file %s does not exist. Please input another file name", strValue)
+			}
+			if !srcInfo.Mode().IsRegular() {
+				return fmt.Errorf("%s is not a file. Please input another file name", strValue)
+			}
+			if srcInfo.Size() == 0 {
+				return fmt.Errorf("%s is an empty file. Please choose another file", strValue)
+			}
+			return nil
+		},
+	}
+	err := survey.Ask([]*survey.Question{fileQuestion}, &filePath)
+	return filePath, err
+}
+
+// Determines whether TLS is enabled, either by asking the user or looking at the TLS key files in their expected locations
+func checkIfTLSEnabled() bool {
+	var err error
+	enableTLS := false
+
+	// Look for the TLS key and cert
+	tlsEnabledEnv, tlsEnabledSet := os.LookupEnv(consts.TLSEnabledEnvVar)
+	defaultTLSKeyLocation := filepath.Join(runningServerConfig.RootDir, consts.TLSKeyPathFromRoot)
+	defaultTLSCertLocation := filepath.Join(runningServerConfig.RootDir, consts.TLSCertPathFromRoot)
+
+	if tlsEnabledSet {
+		if tlsEnabledEnv != "1" {
+			return enableTLS
+		}
+	}
+
+	fileInfo, err := os.Stat(defaultTLSKeyLocation)
+
+	if os.IsNotExist(err) {
+		enableTLS = userConfirm("Enable TLS?")
+		if !enableTLS {
+			return enableTLS
+		} else {
+			tlsKeyPath, err := getPathToFileFromUser("Path to TLS private key file (Ctrl-C to cancel):")
+			if err != nil {
+				// Ctrl-C is returned as an error, so if we encounter any errors, then bail
+				return enableTLS
+			}
+			err = copyFile(tlsKeyPath, defaultTLSKeyLocation)
+			if err != nil {
+				fmt.Printf(Warn+"Could not copy TLS key file from %s to %s: %s. TLS will be disabled", tlsKeyPath, defaultTLSKeyLocation, err)
+				return enableTLS
+			}
+		}
+	} else if fileInfo.Size() == 0 {
+		// Then the TLS key is an empty file, so we will disable TLS
+		return enableTLS
+	}
+
+	fileInfo, err = os.Stat(defaultTLSCertLocation)
+	if os.IsNotExist(err) {
+		tlsCertPath, err := getPathToFileFromUser("Path to TLS certificate file (Ctrl-C to cancel):")
+		if err != nil {
+			return enableTLS
+		}
+		err = copyFile(tlsCertPath, defaultTLSCertLocation)
+		if err != nil {
+			fmt.Printf(Warn+"Could not copy TLS key file from %s to %s: %s. TLS will be disabled", tlsCertPath, defaultTLSKeyLocation, err)
+			return enableTLS
+		}
+	} else if fileInfo.Size() == 0 {
+		// Without a valid key, we cannot enable TLS
+		return enableTLS
+	}
+
+	return true
+}
+
+// Returns the password for the package signing key or gets it from the environment or user
+func getUserSigningKeyPassword() (string, error) {
+	if runningServerConfig != nil && runningServerConfig.SigningKey != nil {
+		// We have already decrypted the key, so we do not need the password
+		return "", ErrPackageSigningKeyDecrypted
+	}
+
+	armoryPasswordEnv, passwordEnvSet := os.LookupEnv(consts.SigningKeyPasswordEnvVar)
+	if passwordEnvSet {
+		return strings.Trim(armoryPasswordEnv, "\""), nil
 	}
 	password := ""
 	prompt := &survey.Password{Message: "Private key password:"}
 	survey.AskOne(prompt, &password)
-	return password
+
+	return password, nil
 }
 
 func userConfirm(msg string) bool {
@@ -127,17 +477,22 @@ func userConfirm(msg string) bool {
 	return confirmed
 }
 
-func getRootDir(cmd *cobra.Command) (string, error) {
-	rootDir, err := cmd.Flags().GetString(rootDirFlagStr)
+func getDefaultRootDir() (string, error) {
+	cwd, err := os.Getwd()
 	if err != nil {
-		return "", fmt.Errorf("Error parsing flag --%s, %s", rootDirFlagStr, err)
+		return "", err
+	}
+	return filepath.Join(cwd, consts.ArmoryRootDirName), nil
+}
+
+func getRootDir(cmd *cobra.Command) (string, error) {
+	rootDir, err := cmd.Flags().GetString(consts.RootDirFlagStr)
+	if err != nil {
+		return "", fmt.Errorf("error parsing flag --%s, %s", consts.RootDirFlagStr, err)
 	}
 	if rootDir == "" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return "", err
-		}
-		rootDir = filepath.Join(cwd, consts.ArmoryRootDirName)
+		return getDefaultRootDir()
+	} else {
+		return rootDir, nil
 	}
-	return rootDir, nil
 }

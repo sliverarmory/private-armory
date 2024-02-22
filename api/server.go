@@ -25,13 +25,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"time"
 
+	"aead.dev/minisign"
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
 	"github.com/sliverarmory/external-armory/consts"
@@ -45,15 +46,15 @@ type ArmoryServer struct {
 	AppLog             *logrus.Logger
 }
 
+type SigningKeyProviderInfo map[string]string
+
 // ArmoryServerConfig - Configuration options for the Armory server
 type ArmoryServerConfig struct {
 	DomainName string `json:"domain_name"`
 	ListenHost string `json:"lhost"`
 	ListenPort uint16 `json:"lport"`
 
-	TLSEnabled     bool   `json:"tls_enabled"`
-	TLSCertificate string `json:"tls_certificate"`
-	TLSKey         string `json:"tls_key"`
+	TLSEnabled bool `json:"tls_enabled"`
 
 	RootDir   string `json:"root_dir"`
 	PublicKey string `json:"public_key"`
@@ -63,6 +64,10 @@ type ArmoryServerConfig struct {
 
 	WriteTimeout time.Duration `json:"write_timeout"`
 	ReadTimeout  time.Duration `json:"read_timeout"`
+
+	SigningKey                *minisign.PrivateKey   `json:"-"`
+	SigningKeyProvider        string                 `json:"signing_key_provider"`
+	SigningKeyProviderDetails SigningKeyProviderInfo `json:"signing_key_provider_details,omitempty"`
 }
 
 // RepoURL - Returns the (most likely) repo URL, if no domain is provided
@@ -154,9 +159,24 @@ func New(config *ArmoryServerConfig, app *logrus.Logger, access *logrus.Logger) 
 	}
 	armoryRouter.Use(server.versionHeaderMiddleware)
 
+	// /armory/index
 	armoryRouter.HandleFunc("/index", server.IndexHandler).Methods(http.MethodGet)
-	armoryRouter.HandleFunc("/aliases", server.AliasesHandler).Methods(http.MethodGet)
-	armoryRouter.HandleFunc("/extensions", server.ExtensionsHandler).Methods(http.MethodGet)
+	// /armory/aliases/<alias_name> (Get the link to the archive and the signature)
+	armoryRouter.HandleFunc(
+		fmt.Sprintf("/%s/{%s}", consts.AliasesDirName, consts.AliasPathVariable),
+		server.AliasMetaHandler).Methods(http.MethodGet)
+	// /armory/aliases/archive/<alias_name> (Get the package itself)
+	armoryRouter.HandleFunc(
+		fmt.Sprintf("/%s/%s/{%s}", consts.AliasesDirName, consts.ArchivePathName, consts.AliasPathVariable),
+		server.AliasArchiveHandler).Methods(http.MethodGet)
+	// /armory/extensions/<extension_name> (Get the link to the archive and the signature)
+	armoryRouter.HandleFunc(
+		fmt.Sprintf("/%s/{%s}", consts.ExtensionsDirName, consts.ExtensionPathVariable),
+		server.ExtensionMetaHandler).Methods(http.MethodGet)
+	// /armory/extensions/archive/<extension_name> (Get the package itself)
+	armoryRouter.HandleFunc(
+		fmt.Sprintf("/%s/%s/{%s}", consts.ExtensionsDirName, consts.ArchivePathName, consts.ExtensionPathVariable),
+		server.ExtensionArchiveHandler).Methods(http.MethodGet)
 
 	server.HTTPServer = &http.Server{
 		Handler:      router,
@@ -200,13 +220,13 @@ func (s *ArmoryServer) IndexHandler(resp http.ResponseWriter, req *http.Request)
 
 func (s *ArmoryServer) getIndex() ([]byte, []byte) {
 	indexPath := filepath.Join(s.ArmoryServerConfig.RootDir, consts.ArmoryIndexFileName)
-	indexData, err := ioutil.ReadFile(indexPath)
+	indexData, err := os.ReadFile(indexPath)
 	if err != nil {
 		s.AppLog.Errorf("Error reading index: %s", err)
 		return nil, nil
 	}
 	indexSigPath := filepath.Join(s.ArmoryServerConfig.RootDir, consts.ArmoryIndexSigFileName)
-	sigData, err := ioutil.ReadFile(indexSigPath)
+	sigData, err := os.ReadFile(indexSigPath)
 	if err != nil {
 		s.AppLog.Errorf("Error reading index: %s", err)
 		return nil, nil
@@ -214,28 +234,104 @@ func (s *ArmoryServer) getIndex() ([]byte, []byte) {
 	return indexData, sigData
 }
 
-// AliasesHandler - Returns alias tars and minisigs
-func (s *ArmoryServer) AliasesHandler(resp http.ResponseWriter, req *http.Request) {
-	resp.Header().Set("Content-Type", "application/octet-stream")
-	data, err := json.Marshal("{}")
-	if err != nil {
-		s.jsonError(resp, err)
-		return
+func (s *ArmoryServer) getPackageData(packageName string, isAlias bool) ([]byte, error) {
+	sigPath := filepath.Join(s.ArmoryServerConfig.RootDir, consts.SignaturesDirName, packageName)
+	// Check the path
+	if _, err := os.Stat(sigPath); errors.Is(err, os.ErrNotExist) {
+		return nil, err
 	}
-	resp.WriteHeader(http.StatusOK)
-	resp.Write(data)
+	sigData, err := os.ReadFile(sigPath)
+	if err != nil {
+		return nil, fmt.Errorf("could not read sig file for package %s: %s", packageName, err)
+	}
+
+	pkgType := ""
+	if isAlias {
+		pkgType = consts.AliasesDirName
+	} else {
+		pkgType = consts.ExtensionsDirName
+	}
+
+	pkgData := armoryPkgResponse{
+		Minisig:  base64.StdEncoding.EncodeToString(sigData),
+		TarGzURL: fmt.Sprintf("%s/armory/%s/%s/%s", s.ArmoryServerConfig.RepoURL(), pkgType, consts.ArchivePathName, packageName),
+	}
+
+	return json.Marshal(&pkgData)
 }
 
-// ExtensionsHandler - Returns extension tars and minisigs
-func (s *ArmoryServer) ExtensionsHandler(resp http.ResponseWriter, req *http.Request) {
-	resp.Header().Set("Content-Type", "application/octet-stream")
-	data, err := json.Marshal("{}")
+// AliasMetaHandler - returns the signature of the package and a link to it as JSON
+func (s *ArmoryServer) AliasMetaHandler(resp http.ResponseWriter, req *http.Request) {
+	resp.Header().Set("Content-Type", "application/json; charset=utf-8")
+	vars := mux.Vars(req)
+	requestedAlias, ok := vars[consts.AliasPathVariable]
+	if !ok {
+		s.jsonError(resp, fmt.Errorf("could not find alias path variable in URL: %s", req.URL.String()))
+		return
+	}
+	pkgData, err := s.getPackageData(requestedAlias, true)
 	if err != nil {
 		s.jsonError(resp, err)
 		return
 	}
 	resp.WriteHeader(http.StatusOK)
-	resp.Write(data)
+	resp.Write(pkgData)
+}
+
+// AliasArchiveHandler - returns the package archive
+func (s *ArmoryServer) AliasArchiveHandler(resp http.ResponseWriter, req *http.Request) {
+	resp.Header().Set("Content-Type", "application/octet-stream")
+	vars := mux.Vars(req)
+	requestedAlias, ok := vars[consts.AliasPathVariable]
+	if !ok {
+		s.jsonError(resp, fmt.Errorf("could not find alias path variable in URL: %s", req.URL.String()))
+		return
+	}
+	fsPath := filepath.Join(s.ArmoryServerConfig.RootDir, consts.AliasesDirName, fmt.Sprintf("%s.tar.gz", requestedAlias))
+	archiveData, err := os.ReadFile(fsPath)
+	if err != nil {
+		s.jsonError(resp, err)
+		return
+	}
+	resp.WriteHeader(http.StatusOK)
+	resp.Write(archiveData)
+}
+
+// ExtensionMetaHandler - returns the signature of the package and a link to it as JSON
+func (s *ArmoryServer) ExtensionMetaHandler(resp http.ResponseWriter, req *http.Request) {
+	resp.Header().Set("Content-Type", "application/json; charset=utf-8")
+	vars := mux.Vars(req)
+	requestedExtension, ok := vars[consts.ExtensionPathVariable]
+	if !ok {
+		s.jsonError(resp, fmt.Errorf("could not find extension path variable in URL: %s", req.URL.String()))
+		return
+	}
+	pkgData, err := s.getPackageData(requestedExtension, false)
+	if err != nil {
+		s.jsonError(resp, err)
+		return
+	}
+	resp.WriteHeader(http.StatusOK)
+	resp.Write(pkgData)
+}
+
+// ExtensionArchiveHandler - returns the package archive
+func (s *ArmoryServer) ExtensionArchiveHandler(resp http.ResponseWriter, req *http.Request) {
+	resp.Header().Set("Content-Type", "application/octet-stream")
+	vars := mux.Vars(req)
+	requestedExtension, ok := vars[consts.ExtensionPathVariable]
+	if !ok {
+		s.jsonError(resp, fmt.Errorf("could not find extension path variable in URL: %s", req.URL.String()))
+		return
+	}
+	fsPath := filepath.Join(s.ArmoryServerConfig.RootDir, consts.ExtensionsDirName, fmt.Sprintf("%s.tar.gz", requestedExtension))
+	archiveData, err := os.ReadFile(fsPath)
+	if err != nil {
+		s.jsonError(resp, err)
+		return
+	}
+	resp.WriteHeader(http.StatusOK)
+	resp.Write(archiveData)
 }
 
 // --------------
