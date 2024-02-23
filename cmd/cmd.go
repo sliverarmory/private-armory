@@ -144,7 +144,7 @@ var rootCmd = &cobra.Command{
 						if !ok {
 							return
 						}
-						if event.Has(fsnotify.Create) || event.Has(fsnotify.Remove) {
+						if event.Has(fsnotify.Create) || event.Has(fsnotify.Remove) || event.Has(fsnotify.Write) {
 							// a file has been added or removed, so force a refresh
 							appLog.Infof("Change detected in %s, refreshing index...", filepath.Dir(event.Name))
 							refreshArmoryIndex(appLog)
