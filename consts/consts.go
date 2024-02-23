@@ -46,9 +46,11 @@ const (
 	RootDirFlagStr = "root-dir"
 
 	// API
-	ArchivePathName       = "archive"
-	AliasPathVariable     = "alias_name"
-	ExtensionPathVariable = "extension_name"
+	ArchivePathName         = "archive"
+	AliasPathVariable       = "alias_name"
+	ExtensionPathVariable   = "extension_name"
+	PackageTypePathVariable = "package_type"
+	PackageNamePathVariable = "package_name"
 
 	// AWS
 	AWSSigningKeySecretNameFlagStr = "aws-key-name"

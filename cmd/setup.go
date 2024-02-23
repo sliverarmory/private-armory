@@ -240,6 +240,7 @@ func getAndStoreSigningKey() error {
 		} else {
 			return err // nil
 		}
+		fmt.Printf(Info + "Using a local package signing key\n")
 		err = getSigningKeyFromLocal()
 	}
 	return err
@@ -300,29 +301,32 @@ func runSetup(flagsChanged []string) error {
 		return err
 	}
 
-	token := ""
-	tokenDigest := ""
-	enableAuth := false
+	clientToken := ""
+	clientTokenDigest := ""
+	enableClientAuth := false
 
 	// This is a bit confusing, but if the disable auth flag was changed, then the user wants to disable auth
 	if !slices.Contains(flagsChanged, consts.DisableAuthFlagStr) {
 		authChoiceEnv, authEnvSet := os.LookupEnv(consts.AuthEnabledEnvVar)
 		if !authEnvSet {
-			enableAuth = userConfirm("Enable authentication?")
+			enableClientAuth = userConfirm("Enable client authentication?")
 		} else {
 			if authChoiceEnv == "1" {
-				enableAuth = true
+				enableClientAuth = true
 			}
 		}
 	} else {
-		enableAuth = true
+		enableClientAuth = true
 	}
 
-	if enableAuth {
-		token, tokenDigest = randomAuthorizationToken()
+	if enableClientAuth {
+		clientToken, clientTokenDigest = randomAuthorizationToken()
 	}
-	runningServerConfig.AuthenticationDisabled = !enableAuth
-	runningServerConfig.AuthorizationTokenDigest = tokenDigest
+	runningServerConfig.ClientAuthenticationDisabled = !enableClientAuth
+	runningServerConfig.ClientAuthorizationTokenDigest = clientTokenDigest
+
+	adminToken, adminTokenDigest := randomAuthorizationToken()
+	runningServerConfig.AdminAuthorizationTokenDigest = adminTokenDigest
 
 	serverConfigData, _ := json.MarshalIndent(runningServerConfig, "", "  ")
 	os.WriteFile(filepath.Join(runningServerConfig.RootDir, consts.ConfigFileName), serverConfigData, 0644)
@@ -331,10 +335,11 @@ func runSetup(flagsChanged []string) error {
 	userConfig, _ := json.MarshalIndent(&ArmoryClientConfig{
 		PublicKey:     runningServerConfig.PublicKey,
 		RepoURL:       runningServerConfig.RepoURL() + "/" + path.Join("armory", "index"),
-		Authorization: token,
+		Authorization: clientToken,
 	}, "", "    ")
 	fmt.Printf(Bold + "*** THIS WILL ONLY BE SHOWN ONCE ***\n")
-	fmt.Printf(Bold+">>> User Config:%s\n%s\n", Normal, userConfig)
+	fmt.Printf(Bold+">>> User Config:%s\n%s\n\n", Normal, userConfig)
+	fmt.Printf(Bold+">>> Admin Authentication Token (use this for adding, modifying, and deleting packages): %s\n%s\n", Normal, adminToken)
 
 	return nil
 }

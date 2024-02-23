@@ -25,11 +25,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"aead.dev/minisign"
@@ -37,6 +39,8 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/sliverarmory/external-armory/consts"
 )
+
+var StatusOKResponse = []byte(`{"status": "ok"}`)
 
 // ArmoryServer - The armory server object
 type ArmoryServer struct {
@@ -59,8 +63,9 @@ type ArmoryServerConfig struct {
 	RootDir   string `json:"root_dir"`
 	PublicKey string `json:"public_key"`
 
-	AuthenticationDisabled   bool   `json:"authentication_disabled"`
-	AuthorizationTokenDigest string `json:"authorization_token_digest"`
+	ClientAuthenticationDisabled   bool   `json:"client_authentication_disabled"`
+	ClientAuthorizationTokenDigest string `json:"client_authorization_token_digest"`
+	AdminAuthorizationTokenDigest  string `json:"admin_authorization_token_digest"`
 
 	WriteTimeout time.Duration `json:"write_timeout"`
 	ReadTimeout  time.Duration `json:"read_timeout"`
@@ -151,12 +156,7 @@ func New(config *ArmoryServerConfig, app *logrus.Logger, access *logrus.Logger) 
 
 	// Armory Handlers
 	armoryRouter := router.PathPrefix("/armory").Subrouter()
-	if !server.ArmoryServerConfig.AuthenticationDisabled {
-		server.AppLog.Infof("Authentication is enabled")
-		armoryRouter.Use(server.authorizationTokenMiddleware)
-	} else {
-		server.AppLog.Infof("Authentication is disabled")
-	}
+	armoryRouter.Use(server.authorizationTokenMiddleware)
 	armoryRouter.Use(server.versionHeaderMiddleware)
 
 	// /armory/index
@@ -177,6 +177,21 @@ func New(config *ArmoryServerConfig, app *logrus.Logger, access *logrus.Logger) 
 	armoryRouter.HandleFunc(
 		fmt.Sprintf("/%s/%s/{%s}", consts.ExtensionsDirName, consts.ArchivePathName, consts.ExtensionPathVariable),
 		server.ExtensionArchiveHandler).Methods(http.MethodGet)
+	// PUT /armory/<package_type>/<name> (add a new package)
+	armoryRouter.HandleFunc(
+		fmt.Sprintf("/{%s}/{%s}", consts.PackageTypePathVariable, consts.PackageNamePathVariable),
+		server.AddPackageHandler,
+	).Methods(http.MethodPut)
+	// PATCH /armory/<package_type>/<name> (modify a package)
+	armoryRouter.HandleFunc(
+		fmt.Sprintf("/{%s}/{%s}", consts.PackageTypePathVariable, consts.PackageNamePathVariable),
+		server.ModifyPackageHandler,
+	).Methods(http.MethodPatch)
+	// DELETE /armory/<package_type>/<name> (delete a package)
+	armoryRouter.HandleFunc(
+		fmt.Sprintf("/{%s}/{%s}", consts.PackageTypePathVariable, consts.PackageNamePathVariable),
+		server.RemovePackageHandler,
+	).Methods(http.MethodDelete)
 
 	server.HTTPServer = &http.Server{
 		Handler:      router,
@@ -235,7 +250,21 @@ func (s *ArmoryServer) getIndex() ([]byte, []byte) {
 }
 
 func (s *ArmoryServer) getPackageData(packageName string, isAlias bool) ([]byte, error) {
+	// Make sure the package still exists
+	pkgPath := ""
+	if isAlias {
+		pkgPath = filepath.Join(s.ArmoryServerConfig.RootDir, consts.AliasesDirName, fmt.Sprintf("%s.tar.gz", packageName))
+	} else {
+		pkgPath = filepath.Join(s.ArmoryServerConfig.RootDir, consts.ExtensionsDirName, fmt.Sprintf("%s.tar.gz", packageName))
+	}
 	sigPath := filepath.Join(s.ArmoryServerConfig.RootDir, consts.SignaturesDirName, packageName)
+	_, err := os.Stat(pkgPath)
+	if err != nil {
+		// There is something wrong with the package, remove signatures if any exist
+		os.Remove(sigPath)
+		return nil, fmt.Errorf("attempted to retrieve package %s, but encountered an error: %s", packageName, err)
+	}
+
 	// Check the path
 	if _, err := os.Stat(sigPath); errors.Is(err, os.ErrNotExist) {
 		return nil, err
@@ -334,17 +363,175 @@ func (s *ArmoryServer) ExtensionArchiveHandler(resp http.ResponseWriter, req *ht
 	resp.Write(archiveData)
 }
 
+func derivePackagePathAndNameFromRequest(rootDir string, req *http.Request) (string, string, error) {
+	vars := mux.Vars(req)
+
+	requestedPackageType, ok := vars[consts.PackageTypePathVariable]
+	if !ok {
+		return "", "", fmt.Errorf("could not find package type in URL: %s", req.URL.String())
+	}
+	requestedPackageName, ok := vars[consts.PackageNamePathVariable]
+	if !ok {
+		return "", "", fmt.Errorf("could not find package name in URL: %s", req.URL.String())
+	}
+
+	packagePath := ""
+	switch requestedPackageType {
+	case consts.AliasesDirName:
+		packagePath = consts.AliasesDirName
+	case consts.ExtensionsDirName:
+		packagePath = consts.ExtensionsDirName
+	default:
+		return "", "", fmt.Errorf("%s is not a valid package type", requestedPackageType)
+	}
+
+	fsPath := filepath.Join(rootDir, packagePath, fmt.Sprintf("%s.tar.gz", requestedPackageName))
+
+	return fsPath, requestedPackageName, nil
+}
+
+func writePackageToDisk(packagePath string, requestedPackageName string, requestBody io.ReadCloser) error {
+	// When the package is written to disk, the server will automatically refresh the index
+	packageData, err := io.ReadAll(requestBody)
+	if err != nil {
+		return fmt.Errorf("error processing request: %s", err)
+	}
+
+	err = os.WriteFile(packagePath, packageData, 0660)
+	if err != nil {
+		return fmt.Errorf("internal error comitting package %s: %s", requestedPackageName, err)
+	}
+
+	return nil
+}
+
+func (s *ArmoryServer) AddPackageHandler(resp http.ResponseWriter, req *http.Request) {
+	s.AppLog.Infoln("Inside of add")
+	resp.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	defer req.Body.Close()
+
+	fsPath, requestedPackageName, err := derivePackagePathAndNameFromRequest(s.ArmoryServerConfig.RootDir, req)
+	if err != nil {
+		s.jsonError(resp, err)
+		return
+	}
+
+	if _, err := os.Stat(fsPath); err == nil {
+		s.jsonError(resp, fmt.Errorf("%s already exists", requestedPackageName))
+		return
+	} else if !errors.Is(err, os.ErrNotExist) {
+		// If we have any other error than the file not existing, bail
+		s.jsonError(resp, fmt.Errorf("internal error for package %s: %s", requestedPackageName, err))
+		return
+	}
+	// If we get here, the package does not exist
+	err = writePackageToDisk(fsPath, requestedPackageName, req.Body)
+	if err != nil {
+		s.jsonError(resp, err)
+		return
+	}
+
+	resp.WriteHeader(http.StatusOK)
+	resp.Write(StatusOKResponse)
+}
+
+func (s *ArmoryServer) ModifyPackageHandler(resp http.ResponseWriter, req *http.Request) {
+	s.AppLog.Infoln("Inside of modify")
+	resp.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	defer req.Body.Close()
+
+	fsPath, requestedPackageName, err := derivePackagePathAndNameFromRequest(s.ArmoryServerConfig.RootDir, req)
+	if err != nil {
+		s.jsonError(resp, err)
+		return
+	}
+
+	if _, err := os.Stat(fsPath); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			s.jsonError(resp, fmt.Errorf("internal error for package %s: %s", requestedPackageName, err))
+			return
+		}
+	}
+
+	// If we are here, then the package exists, and we will overwrite it or it does not exist and we will add it
+	err = writePackageToDisk(fsPath, requestedPackageName, req.Body)
+	if err != nil {
+		s.jsonError(resp, err)
+		return
+	}
+	resp.WriteHeader(http.StatusOK)
+	resp.Write(StatusOKResponse)
+}
+
+func (s *ArmoryServer) RemovePackageHandler(resp http.ResponseWriter, req *http.Request) {
+	resp.Header().Set("Content-Type", "application/json; charset=utf-8")
+	s.AppLog.Infoln("Inside of delete")
+
+	fsPath, requestedPackageName, err := derivePackagePathAndNameFromRequest(s.ArmoryServerConfig.RootDir, req)
+	if err != nil {
+		s.jsonError(resp, err)
+		return
+	}
+
+	_, err = os.Stat(fsPath)
+
+	if err == nil {
+		// The package exists so we can delete it
+		err = os.Remove(fsPath)
+		if err != nil {
+			s.jsonError(resp, fmt.Errorf("internal error while deleting package %s: %s", requestedPackageName, err))
+			return
+		}
+		sigPath := filepath.Join(s.ArmoryServerConfig.RootDir, consts.SignaturesDirName, requestedPackageName)
+		err = os.Remove(sigPath)
+		if err != nil {
+			s.jsonError(resp, fmt.Errorf("internal error while deleting package signature %s: %s", requestedPackageName, err))
+			return
+		}
+		resp.WriteHeader(http.StatusOK)
+		resp.Write(StatusOKResponse)
+	} else if errors.Is(err, os.ErrNotExist) {
+		s.jsonError(resp, fmt.Errorf("package %s does not exist", requestedPackageName))
+		return
+	} else {
+		s.jsonError(resp, fmt.Errorf("internal error for package %s", requestedPackageName))
+		return
+	}
+}
+
 // --------------
 // Middleware
 // --------------
 
 func (s *ArmoryServer) authorizationTokenMiddleware(next http.Handler) http.Handler {
+	// PUT (adding a package), PATCH (modifying a package), and DELETE (removing a package) require the admin token
+	adminMethods := []string{http.MethodPut, http.MethodPatch, http.MethodDelete}
 	return http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) {
 		authHeaderDigest := sha256.Sum256([]byte(req.Header.Get("Authorization")))
-		if fmt.Sprintf("%x", authHeaderDigest[:]) == s.ArmoryServerConfig.AuthorizationTokenDigest {
-			next.ServeHTTP(resp, req)
+		authHeaderDigestStr := fmt.Sprintf("%x", authHeaderDigest[:])
+
+		if slices.Contains(adminMethods, req.Method) {
+			if s.ArmoryServerConfig.AdminAuthorizationTokenDigest != "" && authHeaderDigestStr == s.ArmoryServerConfig.AdminAuthorizationTokenDigest {
+				next.ServeHTTP(resp, req)
+				return
+			} else {
+				s.jsonForbidden(resp, errors.New("user is not authenticated"))
+				return
+			}
+		}
+
+		if !s.ArmoryServerConfig.ClientAuthenticationDisabled {
+			if authHeaderDigestStr == s.ArmoryServerConfig.ClientAuthorizationTokenDigest {
+				next.ServeHTTP(resp, req)
+				return
+			} else {
+				s.jsonForbidden(resp, errors.New("user is not authenticated"))
+				return
+			}
 		} else {
-			s.jsonForbidden(resp, errors.New("user is not authenticated"))
+			next.ServeHTTP(resp, req)
 		}
 	})
 }

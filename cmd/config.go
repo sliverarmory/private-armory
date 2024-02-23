@@ -53,14 +53,14 @@ func getServerConfig(cmd *cobra.Command) error {
 
 	// Populate with defaults that can be changed by a config file or at the command line
 	runningServerConfig = &api.ArmoryServerConfig{
-		ListenPort:                consts.DefaultListenPort,
-		TLSEnabled:                false,
-		AuthenticationDisabled:    true,
-		AuthorizationTokenDigest:  "",
-		ReadTimeout:               time.Duration(5 * time.Minute),
-		WriteTimeout:              time.Duration(5 * time.Minute),
-		SigningKey:                nil,
-		SigningKeyProviderDetails: api.SigningKeyProviderInfo{},
+		ListenPort:                     consts.DefaultListenPort,
+		TLSEnabled:                     false,
+		ClientAuthenticationDisabled:   true,
+		ClientAuthorizationTokenDigest: "",
+		ReadTimeout:                    time.Duration(5 * time.Minute),
+		WriteTimeout:                   time.Duration(5 * time.Minute),
+		SigningKey:                     nil,
+		SigningKeyProviderDetails:      api.SigningKeyProviderInfo{},
 	}
 	runningServerConfig.RootDir, err = getRootDir(cmd)
 	if err != nil {
@@ -157,13 +157,13 @@ func getServerConfig(cmd *cobra.Command) error {
 		flagsChanged = append(flagsChanged, consts.DomainFlagStr)
 	}
 	if cmd.Flags().Changed(consts.DisableAuthFlagStr) {
-		runningServerConfig.AuthenticationDisabled, err = cmd.Flags().GetBool(consts.DisableAuthFlagStr)
+		runningServerConfig.ClientAuthenticationDisabled, err = cmd.Flags().GetBool(consts.DisableAuthFlagStr)
 		if err != nil {
 			return fmt.Errorf("error parsing flag --%s, %s", consts.DisableAuthFlagStr, err)
 		}
 		flagsChanged = append(flagsChanged, consts.DisableAuthFlagStr)
 	}
-	if !runningServerConfig.AuthenticationDisabled && runningServerConfig.AuthorizationTokenDigest == "" {
+	if !runningServerConfig.ClientAuthenticationDisabled && runningServerConfig.ClientAuthorizationTokenDigest == "" {
 		return fmt.Errorf("error cannot have blank authorization token, use --%s", consts.DisableAuthFlagStr)
 	}
 
