@@ -513,7 +513,7 @@ func (s *ArmoryServer) authorizationTokenMiddleware(next http.Handler) http.Hand
 		authHeaderDigestStr := fmt.Sprintf("%x", authHeaderDigest[:])
 
 		if slices.Contains(adminMethods, req.Method) {
-			if authHeaderDigestStr == s.ArmoryServerConfig.AdminAuthorizationTokenDigest {
+			if s.ArmoryServerConfig.AdminAuthorizationTokenDigest != "" && authHeaderDigestStr == s.ArmoryServerConfig.AdminAuthorizationTokenDigest {
 				next.ServeHTTP(resp, req)
 				return
 			} else {
