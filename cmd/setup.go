@@ -493,7 +493,10 @@ func getDefaultRootDir() (string, error) {
 func getRootDir(cmd *cobra.Command) (string, error) {
 	rootDir, err := cmd.Flags().GetString(consts.RootDirFlagStr)
 	if err != nil {
-		return "", fmt.Errorf("error parsing flag --%s, %s", consts.RootDirFlagStr, err)
+		// This usually happens if the cmd does not have a root-dir flag, so unless a config has been specified, assume the default root dir
+		// The only command that calls this function and does not have a root-dir flag is refresh, and if the user wants to refresh an index
+		// that does not live in the default root dir, they should be passing a config file
+		rootDir = ""
 	}
 	if rootDir == "" {
 		return getDefaultRootDir()
