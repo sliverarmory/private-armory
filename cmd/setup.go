@@ -23,7 +23,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"os"
 	"path"
@@ -35,6 +34,7 @@ import (
 	"aead.dev/minisign"
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/sliverarmory/external-armory/consts"
+	"github.com/sliverarmory/external-armory/util"
 	"github.com/spf13/cobra"
 )
 
@@ -344,34 +344,6 @@ func runSetup(flagsChanged []string) error {
 	return nil
 }
 
-// Convenience function for copying a file
-func copyFile(srcPath, dstPath string) (err error) {
-	inputFile, err := os.Open(srcPath)
-	if err != nil {
-		return
-	}
-	defer inputFile.Close()
-
-	outputFile, err := os.Create(dstPath)
-	if err != nil {
-		return
-	}
-	// If there is some issue closing the destination, bubble that up
-	defer func() {
-		/*
-			If there is another error waiting to be reported, then that error
-			takes precedence. If there is no error waiting to be reported,
-			then report the error from closing the file
-		*/
-		if closeErr := outputFile.Close(); closeErr != nil && err == nil {
-			err = closeErr
-		}
-	}()
-
-	_, err = io.Copy(outputFile, inputFile)
-	return err
-}
-
 func getPathToFileFromUser(prompt string) (string, error) {
 	filePath := ""
 
@@ -427,7 +399,7 @@ func checkIfTLSEnabled() bool {
 				// Ctrl-C is returned as an error, so if we encounter any errors, then bail
 				return enableTLS
 			}
-			err = copyFile(tlsKeyPath, defaultTLSKeyLocation)
+			err = util.CopyFile(tlsKeyPath, defaultTLSKeyLocation)
 			if err != nil {
 				fmt.Printf(Warn+"Could not copy TLS key file from %s to %s: %s. TLS will be disabled", tlsKeyPath, defaultTLSKeyLocation, err)
 				return enableTLS
@@ -444,7 +416,7 @@ func checkIfTLSEnabled() bool {
 		if err != nil {
 			return enableTLS
 		}
-		err = copyFile(tlsCertPath, defaultTLSCertLocation)
+		err = util.CopyFile(tlsCertPath, defaultTLSCertLocation)
 		if err != nil {
 			fmt.Printf(Warn+"Could not copy TLS key file from %s to %s: %s. TLS will be disabled", tlsCertPath, defaultTLSKeyLocation, err)
 			return enableTLS

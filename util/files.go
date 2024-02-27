@@ -24,7 +24,6 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 )
@@ -101,32 +100,37 @@ func ReadFileFromTarGz(tarGzFile string, tarPath string) ([]byte, error) {
 			case tar.TypeDir: // = directory
 				continue
 			case tar.TypeReg: // = regular file
-				return ioutil.ReadAll(tarReader)
+				return io.ReadAll(tarReader)
 			}
 		}
 	}
 	return nil, nil
 }
 
-// CopyFile - Copy a file from src to dst
-func CopyFile(src string, dst string) error {
-	in, err := os.Open(src)
+// Convenience function for copying a file
+func CopyFile(srcPath, dstPath string) (err error) {
+	inputFile, err := os.Open(srcPath)
 	if err != nil {
-		return err
+		return
 	}
-	defer in.Close()
-	out, err := os.Create(dst)
+	defer inputFile.Close()
+
+	outputFile, err := os.Create(dstPath)
 	if err != nil {
-		return err
+		return
 	}
-	defer out.Close()
-	_, err = io.Copy(out, in)
-	if err != nil {
-		return err
-	}
-	err = out.Close()
-	if err != nil {
-		return err
-	}
+	// If there is some issue closing the destination, bubble that up
+	defer func() {
+		/*
+			If there is another error waiting to be reported, then that error
+			takes precedence. If there is no error waiting to be reported,
+			then report the error from closing the file
+		*/
+		if closeErr := outputFile.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
+
+	_, err = io.Copy(outputFile, inputFile)
 	return err
 }

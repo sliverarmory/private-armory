@@ -32,6 +32,7 @@ import (
 	"github.com/hashicorp/vault-client-go"
 	"github.com/hashicorp/vault-client-go/schema"
 	"github.com/sliverarmory/external-armory/consts"
+	"github.com/sliverarmory/external-armory/util"
 )
 
 func retrieveSigningKeyDataFromVault(tlsEnabled, customCAEnabled bool) (string, error) {
@@ -159,7 +160,7 @@ func getSigningKeyFromVault() error {
 				if getCustomCA {
 					caFilePath, err := getPathToFileFromUser("Path to custom CA PEM file (Ctrl-C to cancel):")
 					if err == nil {
-						copyErr := copyFile(caFilePath, customCAPath)
+						copyErr := util.CopyFile(caFilePath, customCAPath)
 						if copyErr != nil {
 							return fmt.Errorf("could not copy custom CA PEM file to application root: %s", err)
 						}
