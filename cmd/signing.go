@@ -59,9 +59,11 @@ func setupAWSKeyProvider() error {
 	if runningServerConfig == nil {
 		return fmt.Errorf("server not initialized - run setup first")
 	}
+
 	awsKeyNameEnv, awsKeyNameSet := os.LookupEnv(consts.AWSKeySecretNameEnvVar)
 	awsRegionEnv, awsRegionSet := os.LookupEnv(consts.AWSKeyRegionEnvVar)
 
+	var err error
 	var awsKeyInfo *signing.AWSSigningKeyInfo
 
 	// Command line flag first (runningServerConfig.SigningKeyProviderDetails will be AWSSigningKeyInfo if it was set)
@@ -79,12 +81,15 @@ func setupAWSKeyProvider() error {
 			// Ask the user - if they say yes, then reach out to AWS
 			getKeyFromAWS := userConfirm("Get package signing key from AWS Secrets Manager?")
 			if getKeyFromAWS {
-				survey.AskOne(&survey.Input{
+				err = survey.AskOne(&survey.Input{
 					Message: "Secret name for signing key in Secrets Manager:",
 				},
 					&awsKeyInfo.Path,
 					survey.WithValidator(survey.Required),
 				)
+				if err != nil {
+					return ErrSigningKeyProviderRefused
+				}
 				if !awsRegionSet {
 					awsKeyInfo.Region = getAWSRegionFromUser()
 				} else {
@@ -98,7 +103,7 @@ func setupAWSKeyProvider() error {
 	}
 
 	provider := signing.AWSSigningProvider{}
-	err := provider.New(awsKeyInfo)
+	err = provider.New(awsKeyInfo)
 	if err != nil {
 		return err
 	}
@@ -226,7 +231,15 @@ func setupVaultKeyProvider() error {
 		if vaultAppRoleIDSet {
 			vaultKeyInfo.AppRoleID = vaultAppRoleIDEnv
 		} else {
-			survey.AskOne(&survey.Input{Message: "Vault AppRole Role ID (UUID):"}, &vaultKeyInfo.AppRoleID, survey.WithValidator(survey.Required))
+			err = survey.AskOne(&survey.Input{
+				Message: "Vault AppRole Role ID (UUID):",
+			},
+				&vaultKeyInfo.AppRoleID,
+				survey.WithValidator(survey.Required),
+			)
+			if err != nil {
+				return ErrSigningKeyProviderRefused
+			}
 		}
 	}
 
@@ -234,7 +247,14 @@ func setupVaultKeyProvider() error {
 		if vaultAppSecretIDSet {
 			vaultKeyInfo.AppSecretID = vaultAppSecretIDEnv
 		} else {
-			survey.AskOne(&survey.Password{Message: "Vault AppRole Secret ID (UUID):"}, &vaultKeyInfo.AppSecretID, survey.WithValidator(survey.Required))
+			err = survey.AskOne(&survey.Password{
+				Message: "Vault AppRole Secret ID (UUID):",
+			},
+				&vaultKeyInfo.AppSecretID, survey.WithValidator(survey.Required),
+			)
+			if err != nil {
+				return ErrSigningKeyProviderRefused
+			}
 		}
 	}
 
@@ -242,12 +262,15 @@ func setupVaultKeyProvider() error {
 		if vaultKeyPathSet {
 			vaultKeyInfo.VaultKeyPath = vaultKeyPathEnv
 		} else {
-			survey.AskOne(&survey.Input{
+			err = survey.AskOne(&survey.Input{
 				Message: "Vault Signing Key Path (path to the key with the field at the end - path/to/key/field):",
 			},
 				&vaultKeyInfo.VaultKeyPath,
 				survey.WithValidator(survey.Required),
 			)
+			if err != nil {
+				return ErrSigningKeyProviderRefused
+			}
 		}
 	}
 
@@ -260,5 +283,51 @@ func setupVaultKeyProvider() error {
 	runningServerConfig.SigningKeyProviderName = consts.SigningKeyProviderVault
 	runningServerConfig.SigningKeyProviderDetails = vaultKeyInfo
 	fmt.Printf(Info + "Successfully retrieved signing key from Vault")
+	return nil
+}
+
+/*
+External
+*/
+func setupExternalKeyProvider() error {
+	if runningServerConfig == nil {
+		return fmt.Errorf("server not initialized - run setup first")
+	}
+	var err error
+
+	externalKeyEnv, externalKeySet := os.LookupEnv(consts.ExternalPublicKeyEnvVar)
+
+	externalKeyInfo, ok := runningServerConfig.SigningKeyProviderDetails.(*signing.ExternalSigningKeyInfo)
+	if !ok {
+		externalKeyInfo = &signing.ExternalSigningKeyInfo{}
+		if externalKeySet {
+			externalKeyInfo.PublicKey = strings.Trim(externalKeyEnv, "\"")
+		} else {
+			// Ask the user
+			getKeyFromExternal := userConfirm("Use an external process to sign packages and the index?")
+			if !getKeyFromExternal {
+				return ErrSigningKeyProviderRefused
+			}
+			err = survey.AskOne(&survey.Input{
+				Message: "Minisign Public Key:"},
+				&externalKeyInfo.PublicKey,
+				survey.WithValidator(survey.Required),
+			)
+			if err != nil {
+				return ErrSigningKeyProviderRefused
+			}
+		}
+	}
+
+	provider := signing.ExternalSigningProvider{}
+	err = provider.New(externalKeyInfo)
+	if err != nil {
+		return err
+	}
+
+	runningServerConfig.SigningKeyProvider = &provider
+	runningServerConfig.SigningKeyProviderDetails = externalKeyInfo
+	runningServerConfig.SigningKeyProviderName = consts.SigningKeyProviderExternal
+
 	return nil
 }

@@ -48,18 +48,32 @@ var genSignatureCmd = &cobra.Command{
 	Use:   "genkey",
 	Short: "Generate a package signing key",
 	Run: func(cmd *cobra.Command, args []string) {
-		// All signing keys generated this way will be generated with a blank password
+		var password string
+
+		if cmd.Flags().Changed(consts.PasswordFlagStr) {
+			fmt.Printf("\n" + Warn + Bold +
+				"*** Keys generated with a non-blank password are not compatible with the AWS and Vault key providers *** " +
+				Normal + Warn + "\n\n")
+			err := survey.AskOne(&survey.Password{Message: "Private key password:"}, &password)
+			if err != nil {
+				fmt.Printf("\n" + Info + "user cancelled\n")
+				return
+			}
+		} else {
+			password = ""
+		}
+
 		public, private, err := minisign.GenerateKey(rand.Reader)
 		if err != nil {
 			fmt.Printf(Warn+"failed to generate public/private key(s): %s", err)
 			return
 		}
-		encryptedPrivateKey, err := minisign.EncryptKey("", private)
+		encryptedPrivateKey, err := minisign.EncryptKey(password, private)
 		if err != nil {
 			fmt.Printf(Warn+"failed to generate public/private key(s): %s", err)
 			return
 		}
-		fileName, err := cmd.Flags().GetString("file")
+		fileName, err := cmd.Flags().GetString(consts.FileFlagStr)
 		if err != nil {
 			fmt.Printf("%s error parsing flag --file, %s\n", Warn, err)
 			return
@@ -218,6 +232,11 @@ func getAndStoreSigningKey() error {
 			if err != nil {
 				return fmt.Errorf("could not get package signing key from Vault: %s", err)
 			}
+		case consts.SigningKeyProviderExternal:
+			err = setupExternalKeyProvider()
+			if err != nil {
+				return fmt.Errorf("could not set up external signing provider: %s", err)
+			}
 		default:
 			// The provider is not supported or is local, fall back to file
 			return setupLocalKeyProvider()
@@ -236,6 +255,14 @@ func getAndStoreSigningKey() error {
 		if err != nil {
 			if !errors.Is(err, ErrSigningKeyProviderRefused) {
 				return fmt.Errorf("could not get package signing key from Vault: %s", err)
+			}
+		} else {
+			return err // nil
+		}
+		err = setupExternalKeyProvider()
+		if err != nil {
+			if !errors.Is(err, ErrSigningKeyProviderRefused) {
+				return fmt.Errorf("could not set up external signing provider: %s", err)
 			}
 		} else {
 			return err // nil

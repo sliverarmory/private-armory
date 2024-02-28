@@ -30,16 +30,12 @@ type LocalSigningKeyInfo struct {
 
 func (lski *LocalSigningKeyInfo) UnmarshalJSON(b []byte) error {
 	var info map[string]string
-	//var ok bool
 
 	if err := json.Unmarshal(b, &info); err != nil {
 		return err
 	}
 
 	lski.Path = info[signingKeyPathJSONKey]
-	/*if !ok {
-		return errors.New("key path not provided")
-	}*/
 
 	// Password is optional
 	lski.Password = info[signingKeyPasswordJSONKey]
@@ -49,7 +45,6 @@ func (lski *LocalSigningKeyInfo) UnmarshalJSON(b []byte) error {
 
 func (lski *LocalSigningKeyInfo) MarshalJSON() ([]byte, error) {
 	// The password is not going to go into the JSON object
-	//return json.Marshal(map[string]string{signingKeyPathJSONKey: lski.Path})
 	return json.Marshal([]byte{})
 }
 

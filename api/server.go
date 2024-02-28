@@ -92,6 +92,8 @@ func (asc *ArmoryServerConfig) UnmarshalJSON(data []byte) error {
 		asc.SigningKeyProviderDetails = new(signing.AWSSigningKeyInfo)
 	case consts.SigningKeyProviderVault:
 		asc.SigningKeyProviderDetails = new(signing.VaultSigningKeyInfo)
+	case consts.SigningKeyProviderExternal:
+		asc.SigningKeyProviderDetails = new(signing.ExternalSigningKeyInfo)
 	case consts.SigningKeyProviderLocal:
 		asc.SigningKeyProviderDetails = new(signing.LocalSigningKeyInfo)
 	default:

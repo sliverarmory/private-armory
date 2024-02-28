@@ -42,6 +42,9 @@ const (
 	RefreshFlagStr      = "refresh"
 	DomainFlagStr       = "domain"
 	EnableTLSFlagStr    = "enable-tls"
+	PublicKeyFlagStr    = "public-key"
+	FileFlagStr         = "file"
+	PasswordFlagStr     = "password"
 
 	RootDirFlagStr = "root-dir"
 
@@ -78,11 +81,13 @@ const (
 	VaultRoleIDEnvVar         = "ARMORY_VAULT_APP_ROLE_ID"
 	VaultSecretIDEnvVar       = "ARMORY_VAULT_APP_SECRET_ID"
 	VaultSigningKeyPathEnvVar = "ARMORY_VAULT_SIGNING_KEY_PATH"
+	ExternalPublicKeyEnvVar   = "ARMORY_EXTERNAL_PUBLIC_KEY"
 
 	// Signing Key Providers
-	SigningKeyProviderAWS   = "aws"
-	SigningKeyProviderVault = "vault"
-	SigningKeyProviderLocal = "local"
+	SigningKeyProviderAWS      = "aws"
+	SigningKeyProviderVault    = "vault"
+	SigningKeyProviderLocal    = "local"
+	SigningKeyProviderExternal = "external"
 
 	// Signing Key Provider Details
 	AWSSecretNameKey        = "secret-name"
