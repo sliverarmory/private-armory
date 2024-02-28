@@ -34,9 +34,9 @@ import (
 	"slices"
 	"time"
 
-	"aead.dev/minisign"
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
+	"github.com/sliverarmory/external-armory/api/signing"
 	"github.com/sliverarmory/external-armory/consts"
 )
 
@@ -70,9 +70,37 @@ type ArmoryServerConfig struct {
 	WriteTimeout time.Duration `json:"write_timeout"`
 	ReadTimeout  time.Duration `json:"read_timeout"`
 
-	SigningKey                *minisign.PrivateKey   `json:"-"`
-	SigningKeyProvider        string                 `json:"signing_key_provider"`
-	SigningKeyProviderDetails SigningKeyProviderInfo `json:"signing_key_provider_details,omitempty"`
+	SigningKeyProviderName    string                 `json:"signing_key_provider"`
+	SigningKeyProviderDetails signing.SigningKeyInfo `json:"signing_key_provider_details,omitempty"`
+
+	SigningKeyProvider signing.SigningProvider `json:"-"`
+}
+
+// Need a custom unmarshaler to properly unmarshal the SigningKeyInfo struct
+func (asc *ArmoryServerConfig) UnmarshalJSON(data []byte) error {
+	// Unmarshal the signing key provider name
+	signingKeyTemp := new(struct {
+		ProviderType string `json:"signing_key_provider"`
+	})
+
+	if err := json.Unmarshal(data, signingKeyTemp); err != nil {
+		return err
+	}
+
+	switch signingKeyTemp.ProviderType {
+	case consts.SigningKeyProviderAWS:
+		asc.SigningKeyProviderDetails = new(signing.AWSSigningKeyInfo)
+	case consts.SigningKeyProviderVault:
+		asc.SigningKeyProviderDetails = new(signing.VaultSigningKeyInfo)
+	case consts.SigningKeyProviderLocal:
+		asc.SigningKeyProviderDetails = new(signing.LocalSigningKeyInfo)
+	default:
+		return fmt.Errorf("unsupported signing key provider %q", signingKeyTemp.ProviderType)
+	}
+	// Call unmarshal again
+	// Define a temporary type to avoid recursion
+	type ascAlias ArmoryServerConfig
+	return json.Unmarshal(data, (*ascAlias)(asc))
 }
 
 // RepoURL - Returns the (most likely) repo URL, if no domain is provided
@@ -406,7 +434,6 @@ func writePackageToDisk(packagePath string, requestedPackageName string, request
 }
 
 func (s *ArmoryServer) AddPackageHandler(resp http.ResponseWriter, req *http.Request) {
-	s.AppLog.Infoln("Inside of add")
 	resp.Header().Set("Content-Type", "application/json; charset=utf-8")
 
 	defer req.Body.Close()
@@ -437,7 +464,6 @@ func (s *ArmoryServer) AddPackageHandler(resp http.ResponseWriter, req *http.Req
 }
 
 func (s *ArmoryServer) ModifyPackageHandler(resp http.ResponseWriter, req *http.Request) {
-	s.AppLog.Infoln("Inside of modify")
 	resp.Header().Set("Content-Type", "application/json; charset=utf-8")
 
 	defer req.Body.Close()
@@ -467,7 +493,6 @@ func (s *ArmoryServer) ModifyPackageHandler(resp http.ResponseWriter, req *http.
 
 func (s *ArmoryServer) RemovePackageHandler(resp http.ResponseWriter, req *http.Request) {
 	resp.Header().Set("Content-Type", "application/json; charset=utf-8")
-	s.AppLog.Infoln("Inside of delete")
 
 	fsPath, requestedPackageName, err := derivePackagePathAndNameFromRequest(s.ArmoryServerConfig.RootDir, req)
 	if err != nil {
@@ -577,6 +602,7 @@ func (s *ArmoryServer) jsonError(resp http.ResponseWriter, err error) {
 }
 
 func (s *ArmoryServer) jsonForbidden(resp http.ResponseWriter, err error) {
+	s.AppLog.Error(err)
 	resp.WriteHeader(http.StatusNotFound)
 	resp.Write([]byte{})
 }

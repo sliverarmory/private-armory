@@ -202,13 +202,13 @@ func getAndStoreSigningKey() error {
 	signingKeyProviderEnv, signingKeyProviderSet := os.LookupEnv(consts.SigningKeyProviderEnvVar)
 	if signingKeyProviderSet {
 		signingProvider = signingKeyProviderEnv
-	} else if runningServerConfig.SigningKeyProvider != "" {
-		signingProvider = runningServerConfig.SigningKeyProvider
+	} else if runningServerConfig.SigningKeyProviderName != "" {
+		signingProvider = runningServerConfig.SigningKeyProviderName
 	}
 	if signingProvider != "" {
 		switch signingProvider {
 		case consts.SigningKeyProviderAWS:
-			err = getSigningKeyFromSM()
+			err = setupAWSKeyProvider()
 			if err != nil {
 				// Then the user needs to fix their config, so bail
 				return fmt.Errorf("could not get package signing key from AWS: %s", err)
@@ -220,11 +220,11 @@ func getAndStoreSigningKey() error {
 			}
 		default:
 			// The provider is not supported or is local, fall back to file
-			return getSigningKeyFromLocal()
+			return setupLocalKeyProvider()
 		}
 	} else {
 		// Go through each of the providers until we find the correct one
-		err = getSigningKeyFromSM()
+		err = setupAWSKeyProvider()
 		if err != nil {
 			if !errors.Is(err, ErrSigningKeyProviderRefused) {
 				return fmt.Errorf("could not get package signing key from AWS: %s", err)
@@ -241,7 +241,7 @@ func getAndStoreSigningKey() error {
 			return err // nil
 		}
 		fmt.Printf(Info + "Using a local package signing key\n")
-		err = getSigningKeyFromLocal()
+		err = setupLocalKeyProvider()
 	}
 	return err
 }
@@ -329,11 +329,15 @@ func runSetup(flagsChanged []string) error {
 	runningServerConfig.AdminAuthorizationTokenDigest = adminTokenDigest
 
 	serverConfigData, _ := json.MarshalIndent(runningServerConfig, "", "  ")
-	os.WriteFile(filepath.Join(runningServerConfig.RootDir, consts.ConfigFileName), serverConfigData, 0644)
+	os.WriteFile(filepath.Join(runningServerConfig.RootDir, consts.ConfigFileName), serverConfigData, 0660)
 
 	fmt.Println()
+	pubKey, err := runningServerConfig.SigningKeyProvider.PublicKey()
+	if err != nil {
+		return err
+	}
 	userConfig, _ := json.MarshalIndent(&ArmoryClientConfig{
-		PublicKey:     runningServerConfig.PublicKey,
+		PublicKey:     pubKey,
 		RepoURL:       runningServerConfig.RepoURL() + "/" + path.Join("armory", "index"),
 		Authorization: clientToken,
 	}, "", "    ")
@@ -431,9 +435,11 @@ func checkIfTLSEnabled() bool {
 
 // Returns the password for the package signing key or gets it from the environment or user
 func getUserSigningKeyPassword() (string, error) {
-	if runningServerConfig != nil && runningServerConfig.SigningKey != nil {
-		// We have already decrypted the key, so we do not need the password
-		return "", ErrPackageSigningKeyDecrypted
+	if runningServerConfig != nil {
+		if runningServerConfig.SigningKeyProvider != nil && runningServerConfig.SigningKeyProvider.Initialized() {
+			// We have already decrypted the key, so we do not need the password
+			return "", ErrPackageSigningKeyDecrypted
+		}
 	}
 
 	armoryPasswordEnv, passwordEnvSet := os.LookupEnv(consts.SigningKeyPasswordEnvVar)

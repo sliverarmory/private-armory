@@ -62,6 +62,7 @@ const (
 	VaultRoleIDFlagStr      = "vault-role-id"
 	VaultSecretIDFlagStr    = "vault-secret-id"
 	VaultKeyPathFlagStr     = "vault-path"
+	VaultDefaultAppRolePath = "approle"
 
 	// Environment variables
 	SigningKeyPasswordEnvVar  = "ARMORY_SIGNING_KEY_PASSWORD"
