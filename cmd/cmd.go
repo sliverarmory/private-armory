@@ -76,7 +76,7 @@ func init() {
 	rootCmd.Flags().StringP(consts.AWSSigningKeySecretNameFlagStr, "a", "", "Name for the signing key if using AWS Secrets Manager")
 	rootCmd.Flags().StringP(consts.AWSRegionFlagStr, "g", "us-west-2", "AWS region if using Secrets Manager")
 	rootCmd.Flags().StringP(consts.VaultURLFlagStr, "u", "", "Vault location as a URL")
-	rootCmd.Flags().StringP(consts.VaultAppRolePathFlagStr, "L", "approle", "The approle path for Vault")
+	rootCmd.Flags().StringP(consts.VaultAppRolePathFlagStr, "L", "", "The approle path for Vault")
 	rootCmd.Flags().StringP(consts.VaultRoleIDFlagStr, "i", "", "The GUID for the approle role ID in Vault")
 	rootCmd.Flags().StringP(consts.VaultSecretIDFlagStr, "s", "", "The GUID for the approle secret ID in Vault")
 	rootCmd.Flags().StringP(consts.VaultKeyPathFlagStr, "P", "", "The path to the signing key in Vault, including the field")
@@ -131,7 +131,7 @@ var rootCmd = &cobra.Command{
 		packageWatcher, err := fsnotify.NewWatcher()
 		enableWatcher := true
 		if err != nil {
-			appLog.Errorf("Could not initialize package watcher. Packages will have to be refreshed manually")
+			appLog.Errorf("Could not initialize package watcher. Packages will have to be refreshed manually: %s", err)
 			enableWatcher = false
 		}
 
