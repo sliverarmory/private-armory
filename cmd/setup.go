@@ -214,7 +214,7 @@ func getAndStoreSigningKey() error {
 				return fmt.Errorf("could not get package signing key from AWS: %s", err)
 			}
 		case consts.SigningKeyProviderVault:
-			err = getSigningKeyFromVault()
+			err = setupVaultKeyProvider()
 			if err != nil {
 				return fmt.Errorf("could not get package signing key from Vault: %s", err)
 			}
@@ -232,7 +232,7 @@ func getAndStoreSigningKey() error {
 		} else {
 			return err // nil
 		}
-		err = getSigningKeyFromVault()
+		err = setupVaultKeyProvider()
 		if err != nil {
 			if !errors.Is(err, ErrSigningKeyProviderRefused) {
 				return fmt.Errorf("could not get package signing key from Vault: %s", err)

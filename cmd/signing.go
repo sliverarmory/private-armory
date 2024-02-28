@@ -144,7 +144,7 @@ func vaultUsesTLS(urlStr string) bool {
 	return strings.ToLower(parsedUrl.Scheme) == "https"
 }
 
-func getSigningKeyFromVault() error {
+func setupVaultKeyProvider() error {
 	if runningServerConfig == nil {
 		return fmt.Errorf("server not initialized - run setup first")
 	}
