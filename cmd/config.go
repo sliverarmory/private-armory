@@ -41,6 +41,70 @@ type ArmoryClientConfig struct {
 	AuthorizationCmd string `json:"authorization_cmd,omitempty"`
 }
 
+func checkForCmdSigningProvider(cmd *cobra.Command) error {
+	var err error
+
+	// The signing key provider will be filled in once the details are verified (and a key is retrieved)
+	if cmd.Flags().Changed(consts.AWSSigningKeySecretNameFlagStr) {
+		awsConfigDetails := signing.AWSSigningKeyInfo{}
+
+		awsConfigDetails.Path, err = cmd.Flags().GetString(consts.AWSSigningKeySecretNameFlagStr)
+		if err != nil {
+			return fmt.Errorf("error parsing flag --%s, %s", consts.AWSSigningKeySecretNameFlagStr, err)
+		}
+		awsConfigDetails.Region, err = cmd.Flags().GetString(consts.AWSRegionFlagStr)
+		if err != nil {
+			return fmt.Errorf("error parsing flag --%s, %s", consts.AWSRegionFlagStr, err)
+		}
+
+		runningServerConfig.SigningKeyProviderDetails = &awsConfigDetails
+	} else if cmd.Flags().Changed(consts.VaultURLFlagStr) {
+		vaultConfigDetails := signing.VaultSigningKeyInfo{}
+
+		vaultURL, err := cmd.Flags().GetString(consts.VaultURLFlagStr)
+		if err != nil {
+			return fmt.Errorf("error parsing flag --%s, %s", consts.VaultURLFlagStr, err)
+		}
+		vaultConfigDetails.Address = vaultURL
+
+		vaultApprolePath, err := cmd.Flags().GetString(consts.VaultAppRolePathFlagStr)
+		if err != nil {
+			return fmt.Errorf("error parsing flag --%s, %s", consts.VaultAppRolePathFlagStr, err)
+		}
+		vaultConfigDetails.AppRolePath = vaultApprolePath
+
+		vaultRoleID, err := cmd.Flags().GetString(consts.VaultRoleIDFlagStr)
+		if err != nil {
+			return fmt.Errorf("error parsing flag --%s, %s", consts.VaultRoleIDFlagStr, err)
+		}
+		vaultConfigDetails.AppRoleID = vaultRoleID
+
+		vaultSecretID, err := cmd.Flags().GetString(consts.VaultSecretIDFlagStr)
+		if err != nil {
+			return fmt.Errorf("error parsing flag --%s, %s", consts.VaultSecretIDFlagStr, err)
+		}
+		vaultConfigDetails.AppSecretID = vaultSecretID
+
+		vaultPath, err := cmd.Flags().GetString(consts.VaultKeyPathFlagStr)
+		if err != nil {
+			return fmt.Errorf("error parsing flag --%s, %s", consts.VaultKeyPathFlagStr, err)
+		}
+		vaultConfigDetails.VaultKeyPath = vaultPath
+
+		runningServerConfig.SigningKeyProviderDetails = &vaultConfigDetails
+	} else if cmd.Flags().Changed(consts.PublicKeyFlagStr) {
+		externalSignerDetails := signing.ExternalSigningKeyInfo{}
+		publicKey, err := cmd.Flags().GetString(consts.PublicKeyFlagStr)
+		if err != nil {
+			return fmt.Errorf("error parsing flag --%s, %s", consts.PublicKeyFlagStr, err)
+		}
+		externalSignerDetails.PublicKey = publicKey
+		runningServerConfig.SigningKeyProviderDetails = &externalSignerDetails
+	}
+
+	return nil
+}
+
 func getServerConfig(cmd *cobra.Command) error {
 	// We only need to pull configuration information if we do not currently have a config
 	if runningServerConfig != nil {
@@ -93,57 +157,11 @@ func getServerConfig(cmd *cobra.Command) error {
 			return fmt.Errorf("error parsing config file %s, %s", configPath, err)
 		}
 	}
+
 	// We need to check some CLI arguments in case setup needs to be run
-	// For the next two, the signing key provider will be filled in once the details are verified (and a key is retrieved)
-	if cmd.Flags().Changed(consts.AWSSigningKeySecretNameFlagStr) {
-		awsConfigDetails := signing.AWSSigningKeyInfo{}
-
-		awsConfigDetails.Path, err = cmd.Flags().GetString(consts.AWSSigningKeySecretNameFlagStr)
-		if err != nil {
-			return fmt.Errorf("error parsing flag --%s, %s", consts.AWSSigningKeySecretNameFlagStr, err)
-		}
-		awsConfigDetails.Region, err = cmd.Flags().GetString(consts.AWSRegionFlagStr)
-		if err != nil {
-			return fmt.Errorf("error parsing flag --%s, %s", consts.AWSRegionFlagStr, err)
-		}
-
-		runningServerConfig.SigningKeyProviderDetails = &awsConfigDetails
-	}
-
-	if cmd.Flags().Changed(consts.VaultURLFlagStr) {
-		vaultConfigDetails := signing.VaultSigningKeyInfo{}
-
-		vaultURL, err := cmd.Flags().GetString(consts.VaultURLFlagStr)
-		if err != nil {
-			return fmt.Errorf("error parsing flag --%s, %s", consts.VaultURLFlagStr, err)
-		}
-		vaultConfigDetails.Address = vaultURL
-
-		vaultApprolePath, err := cmd.Flags().GetString(consts.VaultAppRolePathFlagStr)
-		if err != nil {
-			return fmt.Errorf("error parsing flag --%s, %s", consts.VaultAppRolePathFlagStr, err)
-		}
-		vaultConfigDetails.AppRolePath = vaultApprolePath
-
-		vaultRoleID, err := cmd.Flags().GetString(consts.VaultRoleIDFlagStr)
-		if err != nil {
-			return fmt.Errorf("error parsing flag --%s, %s", consts.VaultRoleIDFlagStr, err)
-		}
-		vaultConfigDetails.AppRoleID = vaultRoleID
-
-		vaultSecretID, err := cmd.Flags().GetString(consts.VaultSecretIDFlagStr)
-		if err != nil {
-			return fmt.Errorf("error parsing flag --%s, %s", consts.VaultSecretIDFlagStr, err)
-		}
-		vaultConfigDetails.AppSecretID = vaultSecretID
-
-		vaultPath, err := cmd.Flags().GetString(consts.VaultKeyPathFlagStr)
-		if err != nil {
-			return fmt.Errorf("error parsing flag --%s, %s", consts.VaultKeyPathFlagStr, err)
-		}
-		vaultConfigDetails.VaultKeyPath = vaultPath
-
-		runningServerConfig.SigningKeyProviderDetails = &vaultConfigDetails
+	err = checkForCmdSigningProvider(cmd)
+	if err != nil {
+		return err
 	}
 
 	// CLI flags override config file

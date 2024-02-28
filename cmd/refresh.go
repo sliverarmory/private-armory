@@ -117,6 +117,10 @@ func signArmoryIndex(data []byte, appLog *logrus.Logger) {
 		appLog.Errorf("Failed to sign armory index: %s", err)
 		return
 	}
+	if sig == nil {
+		// Then presumably the index was signed externally
+		return
+	}
 	err = os.WriteFile(filepath.Join(runningServerConfig.RootDir, consts.ArmoryIndexSigFileName), sig, 0644)
 	if err != nil {
 		appLog.Errorf("Failed to write armory index signature: %s", err)
@@ -188,6 +192,10 @@ func signFile(manifest []byte, fileToSign string) error {
 	sigData, err := runningServerConfig.SigningKeyProvider.SignPackage(data, manifest)
 	if err != nil {
 		return err
+	}
+	if sigData == nil {
+		// Then presumably the package was already signed externally
+		return nil
 	}
 	err = os.WriteFile(sigPath, sigData, 0o644)
 	return err
