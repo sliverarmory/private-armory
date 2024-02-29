@@ -18,19 +18,23 @@ package consts
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+type PackageType int
+
 const (
-	ArmoryRootDirName   = "armory-data"
-	ExtensionsDirName   = "extensions"
-	AliasesDirName      = "aliases"
-	BundlesFileName     = "bundles.json"
-	ConfigFileName      = "config.json"
-	CertificatesDirName = "certificates"
-	TLSKeyPathFromRoot  = CertificatesDirName + "/armory.key"
-	TLSCertPathFromRoot = CertificatesDirName + "/armory.crt"
-	DefaultListenPort   = 8888
-	DefaultAWSRegion    = "us-west-2"
-	LocalSigningKeyName = "private.key"
-	VaultCAPathFromRoot = CertificatesDirName + "/armory-vault-ca.pem"
+	ArmoryRootDirName         = "armory-data"
+	ExtensionsDirName         = "extensions"
+	AliasesDirName            = "aliases"
+	BundlesFileName           = "bundles.json"
+	ConfigFileName            = "config.json"
+	CertificatesDirName       = "certificates"
+	TLSKeyPathFromRoot        = CertificatesDirName + "/armory.key"
+	TLSCertPathFromRoot       = CertificatesDirName + "/armory.crt"
+	DefaultListenPort         = 8888
+	DefaultAWSRegion          = "us-west-2"
+	LocalSigningKeyName       = "private.key"
+	VaultCAPathFromRoot       = CertificatesDirName + "/armory-vault-ca.pem"
+	AliasManifestFileName     = "alias.json"
+	ExtensionManifestFileName = "extension.json"
 
 	// Command line flags
 	LhostFlagStr        = "lhost"
@@ -45,6 +49,8 @@ const (
 	PublicKeyFlagStr    = "public-key"
 	FileFlagStr         = "file"
 	PasswordFlagStr     = "password"
+	PasswordFileFlagStr = "password-file"
+	KeyFlagStr          = "key"
 
 	RootDirFlagStr = "root-dir"
 
@@ -82,6 +88,7 @@ const (
 	VaultSecretIDEnvVar       = "ARMORY_VAULT_APP_SECRET_ID"
 	VaultSigningKeyPathEnvVar = "ARMORY_VAULT_SIGNING_KEY_PATH"
 	ExternalPublicKeyEnvVar   = "ARMORY_EXTERNAL_PUBLIC_KEY"
+	SigningKeyEnvVar          = "ARMORY_SIGNING_KEY"
 
 	// Signing Key Providers
 	SigningKeyProviderAWS      = "aws"
@@ -103,4 +110,8 @@ const (
 	ArmoryIndexFileName    = ".armory-index.json"
 	ArmoryIndexSigFileName = ".armory-index.minsig"
 	SignaturesDirName      = ".armory-minisigs"
+
+	// Package types
+	AliasPackageType PackageType = iota
+	ExtensionPackageType
 )

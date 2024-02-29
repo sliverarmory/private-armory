@@ -140,3 +140,9 @@ func (lsp *LocalSigningProvider) SignIndex(indexData []byte) ([]byte, error) {
 	}
 	return minisign.Sign(lsp.privateKey, indexData), nil
 }
+
+func (lsp *LocalSigningProvider) SetPrivateKey(key *minisign.PrivateKey) {
+	lsp.privateKey = *key
+	lsp.initialized = true
+	lsp.name = consts.SigningKeyProviderLocal
+}

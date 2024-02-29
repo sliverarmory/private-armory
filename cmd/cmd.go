@@ -65,7 +65,8 @@ const (
 )
 
 func init() {
-	rootCmd.PersistentFlags().StringP(consts.ConfigFlagStr, "c", "", "Config file path")
+	rootCmd.Flags().StringP(consts.ConfigFlagStr, "c", "", "Config file path")
+	rootCmd.MarkFlagFilename(consts.ConfigFileName, "json")
 
 	rootCmd.Flags().BoolP(consts.DisableAuthFlagStr, "A", false, "Disable authentication token checks")
 	rootCmd.Flags().StringP(consts.LhostFlagStr, "l", "", "Listen host")
@@ -83,13 +84,35 @@ func init() {
 	rootCmd.Flags().StringP(consts.DomainFlagStr, "m", "", "The domain name or IP address that clients will use to connect to the armory")
 	rootCmd.Flags().BoolP(consts.EnableTLSFlagStr, "t", false, "Enable TLS for the armory (certificates must be placed in <armory-root>/certificates, see documentation)")
 	rootCmd.Flags().StringP(consts.RootDirFlagStr, "d", "", "Root armory directory (must be writable)")
+	rootCmd.MarkFlagDirname(consts.RootDirFlagStr)
 	rootCmd.Flags().StringP(consts.PublicKeyFlagStr, "K", "", "Public key for an external signing provider")
 
 	genSignatureCmd.Flags().StringP(consts.FileFlagStr, "f", "", "Path to output key")
 	genSignatureCmd.Flags().BoolP(consts.PasswordFlagStr, "p", false, "Prompt for password for generated key")
 
+	signCmd.PersistentFlags().StringP(consts.KeyFlagStr, "k", "", "Path to the private key")
+	signCmd.PersistentFlags().BoolP(consts.PasswordFlagStr, "p", false, "Prompt for password for the private key")
+	signCmd.PersistentFlags().StringP(consts.PasswordFileFlagStr, "a", "", "Path to a file containing the password")
+
+	signPackageCmd.Flags().StringP(consts.ConfigFlagStr, "c", "", "Path to a configuration file for the armory (required)")
+	signPackageCmd.Flags().StringP(consts.FileFlagStr, "f", "", "Path to the package to sign (required)")
+	signPackageCmd.MarkFlagFilename(consts.ConfigFlagStr, "json")
+	signPackageCmd.MarkFlagRequired(consts.ConfigFlagStr)
+	signPackageCmd.MarkFlagFilename(consts.FileFlagStr, "tar.gz")
+	signPackageCmd.MarkFlagRequired(consts.FileFlagStr)
+
+	signIndexCmd.Flags().StringP(consts.ConfigFlagStr, "c", "", "Path to a configuration file for the armory (required)")
+	signIndexCmd.MarkFlagFilename(consts.ConfigFileName, "json")
+	signIndexCmd.MarkFlagRequired(consts.ConfigFlagStr)
+
+	signCmd.AddCommand(signPackageCmd)
+	signCmd.AddCommand(signIndexCmd)
+
+	refreshCmd.Flags().StringP(consts.ConfigFlagStr, "c", "", "Config file path")
+	refreshCmd.MarkFlagFilename(consts.ConfigFlagStr, "json")
 	rootCmd.AddCommand(refreshCmd)
 	rootCmd.AddCommand(genSignatureCmd)
+	rootCmd.AddCommand(signCmd)
 }
 
 var rootCmd = &cobra.Command{
@@ -123,8 +146,11 @@ var rootCmd = &cobra.Command{
 			} else {
 				appLog.Infof("Forcing refresh of armory index ...")
 			}
-			success := refreshArmoryIndex(appLog)
-			if !success {
+			errors := refreshArmoryIndex()
+			if len(errors) > 0 {
+				for _, err := range errors {
+					appLog.Errorln(err)
+				}
 				os.Exit(2)
 			}
 		}
@@ -149,7 +175,10 @@ var rootCmd = &cobra.Command{
 						if event.Has(fsnotify.Create) || event.Has(fsnotify.Remove) || event.Has(fsnotify.Write) {
 							// a file has been added or removed, so force a refresh
 							appLog.Infof("Change detected in %s, refreshing index...", filepath.Dir(event.Name))
-							refreshArmoryIndex(appLog)
+							errors := refreshArmoryIndex()
+							for _, err := range errors {
+								appLog.Errorln(err)
+							}
 						}
 					case err, ok := <-packageWatcher.Errors:
 						if !ok {
