@@ -29,21 +29,21 @@ API_PKG = github.com/sliverarmory/external-armory/api
 LDFLAGS = "-s -w -X $(API_PKG).VersionHeader=$(VERSION_HEADER)"
 
 
-.PHONY: external-armory
-external-armory:
-	$(GO) build -o external-armory -trimpath -ldflags $(LDFLAGS) .
+.PHONY: armory-server
+armory-server:
+	$(GO) build -o armory-server -trimpath -ldflags $(LDFLAGS) .
 
 .PHONY: release
 release:
 	mkdir -p ./release
-	GOOS=linux GOARCH=amd64 $(GO) build -o ./release/external-armory_linux -trimpath -ldflags $(LDFLAGS) .
-	GOOS=linux GOARCH=arm64 $(GO) build -o ./release/external-armory_linux-arm64 -trimpath -ldflags $(LDFLAGS) .
-	GOOS=darwin GOARCH=amd64 $(GO) build -o ./release/external-armory_macos -trimpath -ldflags $(LDFLAGS) .
-	GOOS=darwin GOARCH=arm64 $(GO) build -o ./release/external-armory_macos-arm64 -trimpath -ldflags $(LDFLAGS) .
-	GOOS=windows GOARCH=amd64 $(GO) build -o ./release/external-armory_windows.exe -trimpath -ldflags $(LDFLAGS) .
+	GOOS=linux GOARCH=amd64 $(GO) build -o ./release/armory-server_linux -trimpath -ldflags $(LDFLAGS) .
+	GOOS=linux GOARCH=arm64 $(GO) build -o ./release/armory-server_linux-arm64 -trimpath -ldflags $(LDFLAGS) .
+	GOOS=darwin GOARCH=amd64 $(GO) build -o ./release/armory-server_macos -trimpath -ldflags $(LDFLAGS) .
+	GOOS=darwin GOARCH=arm64 $(GO) build -o ./release/armory-server_macos-arm64 -trimpath -ldflags $(LDFLAGS) .
+	GOOS=windows GOARCH=amd64 $(GO) build -o ./release/armory-server_windows.exe -trimpath -ldflags $(LDFLAGS) .
 
 clean:
-	rm -f ./external-armory
+	rm -f ./armory-server
 	rm -rf ./release
 
 validate-go-version:

@@ -28,7 +28,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sirupsen/logrus"
 	"github.com/sliverarmory/external-armory/api"
 	"github.com/sliverarmory/external-armory/consts"
 	"github.com/sliverarmory/external-armory/log"
@@ -102,79 +101,82 @@ var refreshCmd = &cobra.Command{
 		}
 		appLog := log.GetAppLogger(runningServerConfig.RootDir)
 		fmt.Printf(Info + "Refreshing armory index ...\n")
-		success := refreshArmoryIndex(appLog)
-		if !success {
-			fmt.Printf(Warn + "Failed to refresh armory index, check logs")
+		errors := refreshArmoryIndex()
+		if len(errors) > 0 {
+			fmt.Printf(Warn + "Failed to refresh armory index:\n")
+			for _, err := range errors {
+				appLog.Errorln(err)
+				fmt.Printf("%s%s\n", Warn, err)
+			}
 			return
 		}
 		fmt.Printf(Success + "Successfully refreshed armory index.\n")
 	},
 }
 
-func signArmoryIndex(data []byte, appLog *logrus.Logger) {
+func signArmoryIndex(data []byte) error {
 	sig, err := runningServerConfig.SigningKeyProvider.SignIndex(data)
 	if err != nil {
-		appLog.Errorf("Failed to sign armory index: %s", err)
-		return
+		return fmt.Errorf("failed to sign armory index: %s", err)
 	}
 	if sig == nil {
 		// Then presumably the index was signed externally
-		return
+		return nil
 	}
 	err = os.WriteFile(filepath.Join(runningServerConfig.RootDir, consts.ArmoryIndexSigFileName), sig, 0644)
 	if err != nil {
-		appLog.Errorf("Failed to write armory index signature: %s", err)
-		return
+		return fmt.Errorf("failed to write armory index signature: %s", err)
 	}
+	return nil
 }
 
-func refreshArmoryIndex(appLog *logrus.Logger) bool {
+func refreshArmoryIndex() []error {
+	allErrors := []error{}
+
 	if !runningServerConfig.SigningKeyProvider.Initialized() {
-		appLog.Errorf("Cannot refresh armory index since no package signing key has been loaded")
-		return false
+		return []error{errors.New("cannot refresh armory index since no package signing key has been loaded")}
+	}
+
+	publicKey, err := runningServerConfig.SigningKeyProvider.PublicKey()
+	if err != nil {
+		return []error{fmt.Errorf("failed to retrieve public key from server configuration: %s", err)}
 	}
 
 	index, err := generateArmoryIndex()
 	if err != nil {
-		appLog.Errorf("Failed to generate armory index: %s", err)
-		return false
+		return []error{fmt.Errorf("failed to generate armory index: %s", err)}
 	}
 	for _, entry := range index.Aliases {
-		entry.PublicKey, err = runningServerConfig.SigningKeyProvider.PublicKey()
-		if err != nil {
-			appLog.Errorf("Failed to retrieve public key from server configuration: %s", err)
-			return false
-		}
+		entry.PublicKey = publicKey
 		entry.RepoURL, err = url.JoinPath(runningServerConfig.RepoURL(), "armory", consts.AliasesDirName, path.Base(entry.CommandName))
 		if err != nil {
-			appLog.Errorf("Failed to create URL for alias %s: %s\n", entry.CommandName, err)
+			allErrors = append(allErrors, fmt.Errorf("failed to create URL for alias %s: %s", entry.CommandName, err))
 			continue
 		}
 	}
 	for _, entry := range index.Extensions {
-		entry.PublicKey, err = runningServerConfig.SigningKeyProvider.PublicKey()
-		if err != nil {
-			appLog.Errorf("Failed to retrieve public key from server configuration: %s", err)
-			return false
-		}
+		entry.PublicKey = publicKey
 		entry.RepoURL, err = url.JoinPath(runningServerConfig.RepoURL(), "armory", consts.ExtensionsDirName, path.Base(entry.CommandName))
 		if err != nil {
-			appLog.Errorf("Failed to create URL for extension %s: %s\n", entry.CommandName, err)
+			allErrors = append(allErrors, fmt.Errorf("failed to create URL for extension %s: %s", entry.CommandName, err))
 			continue
 		}
 	}
 	data, err := json.MarshalIndent(index, "", "  ")
 	if err != nil {
-		appLog.Errorf("Failed to marshal armory index: %s", err)
-		return false
+		allErrors = append(allErrors, fmt.Errorf("failed to marshal armory index: %s", err))
+		return allErrors
 	}
 	err = os.WriteFile(filepath.Join(runningServerConfig.RootDir, consts.ArmoryIndexFileName), data, 0644)
 	if err != nil {
-		appLog.Errorf("Failed to write armory index: %s", err)
-		return false
+		allErrors = append(allErrors, fmt.Errorf("failed to write armory index: %s", err))
+		return allErrors
 	}
-	signArmoryIndex(data, appLog)
-	return true
+	err = signArmoryIndex(data)
+	if err != nil {
+		allErrors = append(allErrors, err)
+	}
+	return allErrors
 }
 
 func signFile(manifest []byte, fileToSign string) error {
@@ -271,7 +273,7 @@ func getAliases() ([]*api.ArmoryEntry, map[string][]byte, error) {
 			appLog.Debugf("%v not a .tar.gz file (skip)", entry)
 			continue
 		}
-		manifestData, err := util.ReadFileFromTarGz(archivePath, "alias.json")
+		manifestData, err := util.ReadFileFromTarGz(archivePath, consts.AliasManifestFileName)
 		if err != nil {
 			appLog.Errorf("Failed to read alias.json from '%s': %s", entry.Name(), err)
 			continue
@@ -326,7 +328,7 @@ func getExtensions() ([]*api.ArmoryEntry, map[string][]byte, error) {
 			appLog.Debugf("%v not a .tar.gz file (skip)", entry)
 			continue
 		}
-		manifestData, err := util.ReadFileFromTarGz(archivePath, "extension.json")
+		manifestData, err := util.ReadFileFromTarGz(archivePath, consts.ExtensionManifestFileName)
 		if err != nil {
 			appLog.Errorf("Failed to read extension.json from '%s': %s", entry.Name(), err)
 			continue

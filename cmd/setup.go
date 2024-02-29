@@ -75,7 +75,7 @@ var genSignatureCmd = &cobra.Command{
 		}
 		fileName, err := cmd.Flags().GetString(consts.FileFlagStr)
 		if err != nil {
-			fmt.Printf("%s error parsing flag --file, %s\n", Warn, err)
+			fmt.Printf("%s error parsing flag %s, %s\n", Warn, consts.FileFlagStr, err)
 			return
 		}
 		if fileName != "" {
