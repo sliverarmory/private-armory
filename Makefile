@@ -36,9 +36,9 @@ armory-server:
 .PHONY: release
 release:
 	mkdir -p ./release
-	GOOS=linux GOARCH=amd64 $(GO) build -o ./release/armory-server_linux -trimpath -ldflags $(LDFLAGS) .
+	GOOS=linux GOARCH=amd64 $(GO) build -o ./release/armory-server_linux-amd64 -trimpath -ldflags $(LDFLAGS) .
 	GOOS=linux GOARCH=arm64 $(GO) build -o ./release/armory-server_linux-arm64 -trimpath -ldflags $(LDFLAGS) .
-	GOOS=darwin GOARCH=amd64 $(GO) build -o ./release/armory-server_macos -trimpath -ldflags $(LDFLAGS) .
+	GOOS=darwin GOARCH=amd64 $(GO) build -o ./release/armory-server_macos-amd64 -trimpath -ldflags $(LDFLAGS) .
 	GOOS=darwin GOARCH=arm64 $(GO) build -o ./release/armory-server_macos-arm64 -trimpath -ldflags $(LDFLAGS) .
 	GOOS=windows GOARCH=amd64 $(GO) build -o ./release/armory-server_windows.exe -trimpath -ldflags $(LDFLAGS) .
 
