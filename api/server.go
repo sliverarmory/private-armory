@@ -155,8 +155,8 @@ type ArmoryBundle struct {
 }
 
 type armoryIndexResponse struct {
-	Minisig     string      `json:"minisig"`      // Minisig (Base 64)
-	ArmoryIndex ArmoryIndex `json:"armory_index"` // Index JSON (Base 64)
+	Minisig     string `json:"minisig"`      // Minisig (Base 64)
+	ArmoryIndex string `json:"armory_index"` // Index JSON (Base 64)
 }
 
 type armoryPkgResponse struct {
@@ -257,32 +257,26 @@ func (s *ArmoryServer) IndexHandler(resp http.ResponseWriter, req *http.Request)
 	index, sig := s.getIndex()
 	data, _ := json.Marshal(&armoryIndexResponse{
 		Minisig:     base64.StdEncoding.EncodeToString(sig),
-		ArmoryIndex: index,
+		ArmoryIndex: base64.StdEncoding.EncodeToString(index),
 	})
 	resp.WriteHeader(http.StatusOK)
 	resp.Write(data)
 }
 
-func (s *ArmoryServer) getIndex() (ArmoryIndex, []byte) {
-	index := ArmoryIndex{}
+func (s *ArmoryServer) getIndex() ([]byte, []byte) {
 	indexPath := filepath.Join(s.ArmoryServerConfig.RootDir, consts.ArmoryIndexFileName)
 	indexData, err := os.ReadFile(indexPath)
 	if err != nil {
 		s.AppLog.Errorf("Error reading index: %s", err)
-		return index, nil
+		return nil, nil
 	}
 	indexSigPath := filepath.Join(s.ArmoryServerConfig.RootDir, consts.ArmoryIndexSigFileName)
 	sigData, err := os.ReadFile(indexSigPath)
 	if err != nil {
 		s.AppLog.Errorf("Error reading index: %s", err)
-		return index, nil
+		return nil, nil
 	}
-	err = json.Unmarshal(indexData, &index)
-	if err != nil {
-		s.AppLog.Errorf("Error unmarshalling index: %s", err)
-		return index, nil
-	}
-	return index, sigData
+	return indexData, sigData
 }
 
 func (s *ArmoryServer) getPackageData(packageName string, isAlias bool) ([]byte, error) {
