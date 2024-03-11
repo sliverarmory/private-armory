@@ -227,6 +227,12 @@ var rootCmd = &cobra.Command{
 			}()
 		}
 
+		// Force a refresh before we start serving files to account for changes in configuration (like enabling or disabling TLS)
+		errors := refreshArmoryIndex()
+		for _, err := range errors {
+			appLog.Errorln(err)
+		}
+
 		go func() {
 			var err error
 			if tlsSetup {
