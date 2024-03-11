@@ -22,13 +22,13 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/sliverarmory/external-armory/api"
 	"github.com/sliverarmory/external-armory/api/signing"
+	"github.com/sliverarmory/external-armory/api/storage"
 	"github.com/sliverarmory/external-armory/consts"
 	"github.com/spf13/cobra"
 )
@@ -105,6 +105,40 @@ func checkForCmdSigningProvider(cmd *cobra.Command) error {
 	return nil
 }
 
+func getConfigDataFromStorageProvider(storageProvider storage.StorageProvider, configPath string) error {
+	if storageProvider == nil {
+		return ErrStorageProviderNotInitialized
+	}
+
+	if configPath != "" {
+		runningServerConfig.StorageProvider.SetConfigPath(configPath)
+	}
+
+	configuredPaths, err := runningServerConfig.StorageProvider.Paths()
+	if err != nil {
+		return ErrServerNotInitialized
+	}
+
+	configData, err := runningServerConfig.StorageProvider.ReadConfig()
+	if err != nil {
+		if errors.Is(err, storage.ErrDoesNotExist) {
+			fmt.Printf(Warn+"Config file %s does not exist\n", configuredPaths.Config)
+		} else {
+			fmt.Printf("Error reading config file %s, %s\n", configuredPaths.Config, err)
+		}
+		// Could not read a config file on disk for whatever reason, so we will use defaults and let CLI args override
+		fmt.Println("Using default configuration and allowing command arguments to override")
+	} else {
+		err = json.Unmarshal(configData, runningServerConfig)
+		if err != nil {
+			// Something was wrong with the config file, the user will have to fix it or re-run setup
+			return fmt.Errorf("error parsing config file %s, %s", configuredPaths.Config, err)
+		}
+	}
+
+	return nil
+}
+
 func getServerConfig(cmd *cobra.Command) error {
 	// We only need to pull configuration information if we do not currently have a config
 	if runningServerConfig != nil {
@@ -126,36 +160,17 @@ func getServerConfig(cmd *cobra.Command) error {
 		WriteTimeout:                   time.Duration(5 * time.Minute),
 		SigningKeyProviderDetails:      nil,
 	}
-	runningServerConfig.RootDir, err = getRootDir(cmd)
+
+	storageProvider, configPath, err := getStorageProvider(cmd)
 	if err != nil {
 		return fmt.Errorf("could not determine root directory and start the server: %s", err)
 	}
-	configPath, err := cmd.Flags().GetString(consts.ConfigFlagStr)
+
+	runningServerConfig.StorageProvider = storageProvider
+
+	err = getConfigDataFromStorageProvider(storageProvider, configPath)
 	if err != nil {
-		return fmt.Errorf("error parsing flag --%s, %s", consts.ConfigFlagStr, err)
-	}
-	if configPath == "" {
-		cwd, _ := os.Getwd()
-		configPath = filepath.Join(cwd, consts.ArmoryRootDirName, consts.ConfigFileName)
-		if runningServerConfig.RootDir == "" {
-			runningServerConfig.RootDir = filepath.Join(cwd, consts.ArmoryRootDirName)
-		}
-	}
-	configData, err := os.ReadFile(configPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			fmt.Printf(Warn+"Config file %s does not exist\n", configPath)
-		} else {
-			fmt.Printf("Error reading config file %s, %s\n", configPath, err)
-		}
-		// Could not read a config file on disk for whatever reason, so we will use defaults and let CLI args override
-		fmt.Println("Using default configuration and allowing command arguments to override")
-	} else {
-		err = json.Unmarshal(configData, runningServerConfig)
-		if err != nil {
-			// Something was wrong with the config file, the user will have to fix it or re-run setup
-			return fmt.Errorf("error parsing config file %s, %s", configPath, err)
-		}
+		return err
 	}
 
 	// We need to check some CLI arguments in case setup needs to be run
@@ -199,6 +214,14 @@ func getServerConfig(cmd *cobra.Command) error {
 		flagsChanged = append(flagsChanged, consts.LportFlagStr)
 	}
 
+	if cmd.Flags().Changed(consts.EnableTLSFlagStr) {
+		runningServerConfig.TLSEnabled, err = cmd.Flags().GetBool(consts.EnableTLSFlagStr)
+		if err != nil {
+			return fmt.Errorf("error parsing flag --%s, %s", consts.EnableTLSFlagStr, err)
+		}
+		flagsChanged = append(flagsChanged, consts.EnableTLSFlagStr)
+	}
+
 	if cmd.Flags().Changed(consts.ReadTimeoutFlagStr) {
 		readTimeoutStr, err := cmd.Flags().GetString(consts.ReadTimeoutFlagStr)
 		if err != nil {
@@ -227,13 +250,13 @@ func getServerConfig(cmd *cobra.Command) error {
 
 	// At this point, we should know where the root dir is
 	// If the necessary directories are not setup, then we need to run setup
-	if !checkApplicationDirectories(runningServerConfig.RootDir) {
+	if runningServerConfig.StorageProvider.IsNew() {
 		err = runSetup(flagsChanged)
 		if err != nil {
 			// Remove the directories we created
-			folderErr := os.RemoveAll(runningServerConfig.RootDir)
+			folderErr := runningServerConfig.StorageProvider.Destroy()
 			if folderErr != nil {
-				fmt.Printf("%s could not delete application directory %s: %s\n", Warn, runningServerConfig.RootDir, folderErr)
+				fmt.Printf("%s could not delete application root %q: %s\n", Warn, runningServerConfig.StorageProvider.BasePath(), folderErr)
 			}
 			runningServerConfig = nil
 		}
@@ -242,6 +265,19 @@ func getServerConfig(cmd *cobra.Command) error {
 	} else {
 		// This armory has been setup before, so we need to get the signing key
 		getAndStoreSigningKey()
+		if runningServerConfig.TLSEnabled {
+			// Make sure we have the certificates set up properly if we are going to enable TLS
+			// If it fails, make sure to update the config
+			tlsEnabled := checkIfTLSEnabled()
+			runningServerConfig.TLSEnabled = tlsEnabled
+		}
+
+		if cmd.Flags().Changed(consts.UpdateConfigFlagStr) {
+			err = writeServerConfig()
+			if err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil

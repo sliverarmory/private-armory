@@ -74,13 +74,8 @@ func ByteCountBinary(b int64) string {
 }
 
 // ReadFileFromTarGz - Read a file from a tar.gz file in-memory
-func ReadFileFromTarGz(tarGzFile string, tarPath string) ([]byte, error) {
-	f, err := os.Open(tarGzFile)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	gzf, err := gzip.NewReader(f)
+func ReadFileFromTarGzArchive(source io.Reader, tarPath string) ([]byte, error) {
+	gzf, err := gzip.NewReader(source)
 	if err != nil {
 		return nil, err
 	}
@@ -105,6 +100,21 @@ func ReadFileFromTarGz(tarGzFile string, tarPath string) ([]byte, error) {
 		}
 	}
 	return nil, nil
+}
+
+func ReadFileFromTarGz(archivePath, tarPath string) ([]byte, error) {
+	fileHandle, err := os.Open(archivePath)
+	if err != nil {
+		return nil, err
+	}
+	defer fileHandle.Close()
+	return ReadFileFromTarGzArchive(fileHandle, tarPath)
+}
+
+func ReadFileFromTarGzMemory(archiveData []byte, tarPath string) ([]byte, error) {
+	bytesReader := bytes.NewReader(archiveData)
+
+	return ReadFileFromTarGzArchive(bytesReader, tarPath)
 }
 
 // Convenience function for copying a file

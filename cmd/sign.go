@@ -2,42 +2,49 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"aead.dev/minisign"
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/sliverarmory/external-armory/api"
+	"github.com/sliverarmory/external-armory/api/patterns"
 	"github.com/sliverarmory/external-armory/api/signing"
 	"github.com/sliverarmory/external-armory/consts"
 	"github.com/sliverarmory/external-armory/util"
 	"github.com/spf13/cobra"
 )
 
-func getSigningKey(path, password string) (*minisign.PrivateKey, string, error) {
-	// The signing key can be provided through an environment variable or a file whose path is provided on the command line
+func getSigningKey(password string) (*minisign.PrivateKey, string, error) {
+	// The signing key can be provided through an environment variable or a file whose path is provided via the config file
+	if runningServerConfig == nil {
+		return nil, "all sources", ErrServerNotInitialized
+	}
 
 	var signingKeyData []byte
 	var err error
 	var privateKey minisign.PrivateKey
 	var source string
 
-	// The command line overrides the environment variable
-	if path != "" {
-		source = fmt.Sprintf("file %q", path)
-		signingKeyData, err = os.ReadFile(path)
-		if err != nil {
-			return nil, path, fmt.Errorf("could not read key from path %q: %s", source, err)
-		}
-	} else {
+	// Environment variable overrides config file
+	signingKeyDataEnv, signingKeySet := os.LookupEnv(consts.SigningKeyEnvVar)
+
+	if signingKeySet {
 		source = fmt.Sprintf("environment variable %s", consts.SigningKeyEnvVar)
-		signingKeyDataEnv, signingKeySet := os.LookupEnv(consts.SigningKeyEnvVar)
-		if !signingKeySet {
-			return nil, consts.SigningKeyEnvVar, fmt.Errorf("signing key not provided")
-		}
 		signingKeyData = []byte(signingKeyDataEnv)
+	} else {
+		// Use the key from the config file
+		source = "file from storage provider"
+		signingKeyData, err = runningServerConfig.StorageProvider.ReadPackageSigningKey()
+		if err != nil {
+			return nil, source, err
+		}
+	}
+
+	if len(signingKeyData) == 0 {
+		return nil, "all sources", errors.New("signing key not provided")
 	}
 
 	if password == "" {
@@ -55,8 +62,8 @@ func getSigningKey(path, password string) (*minisign.PrivateKey, string, error) 
 	return &privateKey, source, nil
 }
 
-func displayPublicKey(path, password string) {
-	privateKey, source, err := getSigningKey(path, password)
+func displayPublicKey(password string) {
+	privateKey, source, err := getSigningKey(password)
 	if err != nil {
 		fmt.Printf(Warn+"error getting signing key from %s: %s\n", source, err)
 		return
@@ -90,12 +97,7 @@ func getPasswordFromFile(path string) (string, error) {
 	return string(passwordFromFile), nil
 }
 
-func extractSigningKeyInfoFromCmd(cmd *cobra.Command) (keyPath string, password string, err error) {
-	keyPath, err = cmd.Flags().GetString(consts.KeyFlagStr)
-	if err != nil {
-		err = fmt.Errorf(Warn+"could not parse flag --%s: %s", consts.KeyFlagStr, err)
-		return keyPath, password, err
-	}
+func extractSigningPasswordFromCmd(cmd *cobra.Command) (password string, err error) {
 	promptPassword, err := cmd.Flags().GetBool(consts.PasswordFlagStr)
 	if err != nil {
 		err = fmt.Errorf(Warn+"could not parse flag --%s: %s", consts.PasswordFlagStr, err)
@@ -124,49 +126,45 @@ var signCmd = &cobra.Command{
 	Short: "Package and index signing",
 	Long:  "",
 	Run: func(cmd *cobra.Command, args []string) {
-		keyPath, password, err := extractSigningKeyInfoFromCmd(cmd)
+		password, err := extractSigningPasswordFromCmd(cmd)
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
-		displayPublicKey(keyPath, password)
+		displayPublicKey(password)
 	},
 }
 
 func signPackageStandalone(packagePath string) error {
-	var manifest []byte
+	var manifestData []byte
 	var packageType consts.PackageType
-	var copyPath string
 	var err error
 
 	if runningServerConfig == nil {
-		return fmt.Errorf("the application has not been initialized properly")
+		return ErrServerNotInitialized
 	} else if runningServerConfig.SigningKeyProvider == nil {
-		return fmt.Errorf("the application has not been initialized properly")
-	}
-
-	// Check that the root directory exists
-	rootDirInfo, err := os.Stat(runningServerConfig.RootDir)
-	if err != nil {
-		return fmt.Errorf("could not get information on root directory %q: %s", runningServerConfig.RootDir, err)
-	}
-	if !rootDirInfo.IsDir() {
-		return fmt.Errorf("%q is not a directory", runningServerConfig.RootDir)
+		return ErrSigningProviderNotInitialized
+	} else if runningServerConfig.StorageProvider == nil {
+		return ErrStorageProviderNotInitialized
 	}
 
 	// Determine the type of package from the manifest and get the manifest
-	// Try alias first
-	manifest, err = util.ReadFileFromTarGz(packagePath, consts.AliasManifestFileName)
+	packageData, err := os.ReadFile(packagePath)
 	if err != nil {
 		return fmt.Errorf("could not read from %q: %s", packagePath, err)
 	}
-	if manifest == nil {
+	// Try alias first
+	manifestData, err = util.ReadFileFromTarGzMemory(packageData, consts.AliasArchiveManifestFilePath)
+	if err != nil {
+		return fmt.Errorf("could not read from %q: %s", packagePath, err)
+	}
+	if manifestData == nil {
 		// Then this may be an extension
-		manifest, err = util.ReadFileFromTarGz(packagePath, consts.ExtensionManifestFileName)
+		manifestData, err = util.ReadFileFromTarGzMemory(packageData, consts.ExtensionArchiveManifestFilePath)
 		if err != nil {
 			return fmt.Errorf("could not read from %q: %s", packagePath, err)
 		}
-		if manifest == nil {
+		if manifestData == nil {
 			// Then something is wrong with this file
 			return fmt.Errorf("could not determine type of package for %q", packagePath)
 		}
@@ -175,61 +173,77 @@ func signPackageStandalone(packagePath string) error {
 		packageType = consts.AliasPackageType
 	}
 
-	// By now, we have the manifest and file type
-	// Start by signing it
-	err = signFile(manifest, packagePath)
-	if err != nil {
-		return fmt.Errorf("could not sign file %q: %s", packagePath, err)
-	}
-
-	// Copy the package to the appropriate directory
+	packageName := ""
 	switch packageType {
 	case consts.AliasPackageType:
-		copyPath = filepath.Join(runningServerConfig.RootDir, consts.AliasesDirName, filepath.Base(packagePath))
-	case consts.ExtensionPackageType:
-		copyPath = filepath.Join(runningServerConfig.RootDir, consts.ExtensionsDirName, filepath.Base(packagePath))
-	}
-	err = util.CopyFile(packagePath, copyPath)
-	if err != nil {
-		firstError := fmt.Sprintf("could not copy package to %q: %s", copyPath, err)
-		// Try to delete the signature
-		sigPath := filepath.Join(runningServerConfig.RootDir, consts.SignaturesDirName, filepath.Base(strings.TrimSuffix(packagePath, ".tar.gz")))
-		err = os.Remove(sigPath)
+		aliasManifest := &patterns.AliasManifest{}
+		err := json.Unmarshal(manifestData, aliasManifest)
 		if err != nil {
-			return fmt.Errorf("encountered two errors:\n%s\ncould not remove signature %q: %s", firstError, sigPath, err)
+			return fmt.Errorf("could not parse package manifest: %s", err)
+		}
+		packageName = aliasManifest.Name
+	case consts.ExtensionPackageType:
+		extensionManifest := &patterns.ExtensionManifestV1{}
+		err := json.Unmarshal(manifestData, extensionManifest)
+		if err != nil {
+			return fmt.Errorf("could not parse package manifest: %s", err)
+		}
+		packageName = extensionManifest.Name
+	default:
+		return errors.New("the package is not a supported type")
+	}
+
+	// Write the package to the armory
+	err = runningServerConfig.StorageProvider.WritePackageWithFileName(filepath.Base(packagePath), packageData)
+	if err != nil {
+		return fmt.Errorf("could not write package to the storage provider: %s", err)
+	}
+
+	// By now, we have the manifest and file type
+	// Start by signing it
+	sigData, err := signFile(manifestData, packageData)
+	if err != nil {
+		return fmt.Errorf("could not sign package %s: %s", packageName, err)
+	}
+
+	// sigData should not be nil because our signing provider is not external
+	if sigData == nil {
+		return fmt.Errorf("signature was invalid")
+	}
+	sigErr := runningServerConfig.StorageProvider.WritePackageSignature(packageName, sigData)
+
+	if sigErr != nil {
+		// If the package signature could not be written, then delete the package too
+		packageErr := runningServerConfig.StorageProvider.RemovePackage(packageName)
+		if packageErr == nil {
+			return fmt.Errorf("could not write package signature: %s", sigErr)
 		} else {
-			return fmt.Errorf(firstError)
+			return fmt.Errorf("could not write package signature: %s; could not delete package %s: %s", sigErr, packageName, packageErr)
 		}
 	}
 	return nil
 }
 
 func getCommonInfoForSigningCmds(cmd *cobra.Command) (err error) {
-	configPath, err := cmd.Flags().GetString(consts.ConfigFlagStr)
+	storageProvider, configPath, err := getStorageProvider(cmd)
 	if err != nil {
-		err = fmt.Errorf("error parsing flag --%s, %s", consts.ConfigFlagStr, err)
-		return
-	}
-	// Reconstitute the configuration
-	configData, err := os.ReadFile(configPath)
-	if err != nil {
-		err = fmt.Errorf("could not read config from %q: %s", configPath, err)
-		return
-	}
-	runningServerConfig = &api.ArmoryServerConfig{}
-
-	err = json.Unmarshal(configData, runningServerConfig)
-	if err != nil {
-		// Something was wrong with the config file, the user will have to fix it
-		err = fmt.Errorf("error parsing config file %q: %s", configPath, err)
 		return
 	}
 
-	keyPath, password, err := extractSigningKeyInfoFromCmd(cmd)
+	runningServerConfig = &api.ArmoryServerConfig{
+		StorageProvider: storageProvider,
+	}
+
+	err = getConfigDataFromStorageProvider(storageProvider, configPath)
 	if err != nil {
 		return
 	}
-	signingKey, source, err := getSigningKey(keyPath, password)
+
+	password, err := extractSigningPasswordFromCmd(cmd)
+	if err != nil {
+		return
+	}
+	signingKey, source, err := getSigningKey(password)
 	if err != nil {
 		err = fmt.Errorf(Warn+"could not get signing key from source %s: %s", source, err)
 		return

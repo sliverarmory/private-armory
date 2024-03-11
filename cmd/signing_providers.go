@@ -4,20 +4,20 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/sliverarmory/external-armory/api/signing"
 	"github.com/sliverarmory/external-armory/consts"
-	"github.com/sliverarmory/external-armory/util"
 )
 
 /*
 Local
 */
 func setupLocalKeyProvider() error {
-	localKeyPath := filepath.Join(runningServerConfig.RootDir, consts.LocalSigningKeyName)
+	if runningServerConfig == nil {
+		return ErrServerNotInitialized
+	}
 	password, err := getUserSigningKeyPassword()
 	if err != nil {
 		return fmt.Errorf("could not get signing key password: %s", err)
@@ -25,8 +25,8 @@ func setupLocalKeyProvider() error {
 
 	provider := &signing.LocalSigningProvider{}
 	err = provider.New(&signing.LocalSigningKeyInfo{
-		Path:     localKeyPath,
-		Password: password,
+		Password:        password,
+		StorageProvider: runningServerConfig.StorageProvider,
 	})
 	if err != nil {
 		return err
@@ -57,7 +57,7 @@ func getAWSRegionFromUser() string {
 // Attempts to get the package signing key from AWS SM
 func setupAWSKeyProvider() error {
 	if runningServerConfig == nil {
-		return fmt.Errorf("server not initialized - run setup first")
+		return ErrServerNotInitialized
 	}
 
 	awsKeyNameEnv, awsKeyNameSet := os.LookupEnv(consts.AWSKeySecretNameEnvVar)
@@ -151,7 +151,7 @@ func vaultUsesTLS(urlStr string) bool {
 
 func setupVaultKeyProvider() error {
 	if runningServerConfig == nil {
-		return fmt.Errorf("server not initialized - run setup first")
+		return ErrServerNotInitialized
 	}
 
 	var err error
@@ -161,8 +161,6 @@ func setupVaultKeyProvider() error {
 	vaultAppRoleIDEnv, vaultAppRoleIDSet := os.LookupEnv(consts.VaultRoleIDEnvVar)
 	vaultAppSecretIDEnv, vaultAppSecretIDSet := os.LookupEnv(consts.VaultSecretIDEnvVar)
 	vaultKeyPathEnv, vaultKeyPathSet := os.LookupEnv(consts.VaultSigningKeyPathEnvVar)
-
-	customCAPath := filepath.Join(runningServerConfig.RootDir, consts.VaultCAPathFromRoot)
 
 	vaultKeyInfo, ok := runningServerConfig.SigningKeyProviderDetails.(*signing.VaultSigningKeyInfo)
 	if !ok {
@@ -187,25 +185,22 @@ func setupVaultKeyProvider() error {
 	// Check to see if we need to use a custom CA file
 	if vaultKeyInfo.TLSEnabled {
 		// If the PEM file for the CA has been supplied, then use that
-		if _, err := os.Stat(customCAPath); err == nil {
-			vaultKeyInfo.CustomCACert, err = os.ReadFile(customCAPath)
-			if err != nil {
-				return fmt.Errorf("could not read custom CA certificate from %s: %s", customCAPath, err)
-			}
-		} else {
+		vaultKeyInfo.CustomCACert, err = runningServerConfig.StorageProvider.ReadVaultCA()
+		if err != nil {
 			getCustomCA := userConfirm("Do you need to supply a custom CA PEM file?")
 			if getCustomCA {
 				caFilePath, err := getPathToFileFromUser("Path to custom CA PEM file (Ctrl-C to cancel):")
 				if err == nil {
 					// For future runs of the server, it is easier we keep the file at the default path
-					copyErr := util.CopyFile(caFilePath, customCAPath)
-					if copyErr != nil {
-						return fmt.Errorf("could not copy custom CA PEM file to application root: %s", err)
-					}
-					vaultKeyInfo.CustomCACert, err = os.ReadFile(caFilePath)
+					caData, err := os.ReadFile(caFilePath)
 					if err != nil {
-						return fmt.Errorf("could not read custom CA certificate from %s: %s", caFilePath, err)
+						return fmt.Errorf("could not read custom CA PEM file: %s", err)
 					}
+					err = runningServerConfig.StorageProvider.WriteVaultCA(caData)
+					if err != nil {
+						return fmt.Errorf("could not write custom CA certificate to storage provider: %s", err)
+					}
+					vaultKeyInfo.CustomCACert = caData
 				} else {
 					return fmt.Errorf("cancelled by user")
 				}
@@ -291,7 +286,7 @@ External
 */
 func setupExternalKeyProvider() error {
 	if runningServerConfig == nil {
-		return fmt.Errorf("server not initialized - run setup first")
+		return ErrServerNotInitialized
 	}
 	var err error
 

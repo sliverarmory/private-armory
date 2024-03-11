@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -33,8 +34,9 @@ import (
 
 	"aead.dev/minisign"
 	"github.com/AlecAivazis/survey/v2"
+	"github.com/sliverarmory/external-armory/api"
+	"github.com/sliverarmory/external-armory/api/storage"
 	"github.com/sliverarmory/external-armory/consts"
-	"github.com/sliverarmory/external-armory/util"
 	"github.com/spf13/cobra"
 )
 
@@ -137,51 +139,6 @@ func askForNumber(prompt string, min, max, defaultValue int) (int, error) {
 	return result, err
 }
 
-// Checks a given path to see if it is a directory, and if it is not, creates it
-// The name parameter is a descriptive name and is used for informing the user
-func checkAndCreateDirectory(name, path string) error {
-	pathInfo, err := os.Stat(path)
-	if os.IsNotExist(err) {
-		fmt.Printf(Info+"Creating %s directory: %s\n", name, path)
-		return os.Mkdir(path, 0755)
-	}
-	if !pathInfo.IsDir() {
-		return fmt.Errorf("%s exists but is not a directory", path)
-	}
-	// Then the path exists and is a directory
-	return nil
-}
-
-// Checks if a path is a directory
-func checkDirectory(path string) bool {
-	pathInfo, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-	if !pathInfo.IsDir() {
-		return false
-	}
-	return true
-}
-
-// Checks to see if the application's directories are setup
-func checkApplicationDirectories(rootDir string) bool {
-	appDirs := []string{
-		filepath.Join(rootDir, consts.ExtensionsDirName),
-		filepath.Join(rootDir, consts.AliasesDirName),
-		filepath.Join(rootDir, consts.SignaturesDirName),
-		filepath.Join(rootDir, consts.CertificatesDirName),
-	}
-
-	for _, dir := range appDirs {
-		if !checkDirectory(dir) {
-			return false
-		}
-	}
-
-	return true
-}
-
 // Gets the listening port for the server from the user or the environment
 func getListeningPort() uint16 {
 	var err error
@@ -189,7 +146,11 @@ func getListeningPort() uint16 {
 	listenPort := consts.DefaultListenPort
 	listenPortEnv, listenPortEnvSet := os.LookupEnv(consts.PortEnvVar)
 	if !listenPortEnvSet {
-		listenPort, err = askForNumber(fmt.Sprintf("Listening port (default: %d):", consts.DefaultListenPort), 1, math.MaxUint16, consts.DefaultListenPort)
+		listenPort, err = askForNumber(fmt.Sprintf("Listening port (default: %d):", consts.DefaultListenPort),
+			1,
+			math.MaxUint16,
+			consts.DefaultListenPort,
+		)
 	} else {
 		listenPort, err = strconv.Atoi(listenPortEnv)
 		if listenPort < 1 || listenPort > math.MaxUint16 || err != nil {
@@ -273,41 +234,65 @@ func getAndStoreSigningKey() error {
 	return err
 }
 
+func generateClientToken() string {
+	clientToken, clientTokenDigest := randomAuthorizationToken()
+
+	runningServerConfig.ClientAuthorizationTokenDigest = clientTokenDigest
+
+	return clientToken
+}
+
+func showClientConfig(pubKey, clientToken string) {
+	fmt.Println()
+	userConfig, _ := json.MarshalIndent(&ArmoryClientConfig{
+		PublicKey:     pubKey,
+		RepoURL:       runningServerConfig.RepoURL() + "/" + path.Join("armory", "index"),
+		Authorization: clientToken,
+	}, "", "    ")
+	fmt.Printf(Bold + "*** THIS WILL ONLY BE SHOWN ONCE ***\n")
+	fmt.Printf(Bold+">>> User Config:%s\n%s\n\n", Normal, userConfig)
+}
+
+func writeServerConfig() error {
+	serverConfigData, _ := json.MarshalIndent(runningServerConfig, "", "  ")
+	err := runningServerConfig.StorageProvider.WriteConfig(serverConfigData)
+	if err != nil {
+		return fmt.Errorf("could not write server config: %s", err)
+	}
+
+	return nil
+}
+
 // Runs initial setup to make sure we have everything need to run the armory
 func runSetup(flagsChanged []string) error {
+	if runningServerConfig == nil {
+		return ErrServerNotInitialized
+	}
+
 	var err error
+	var configPath string
 
-	directories := map[string]string{
-		"extensions":   filepath.Join(runningServerConfig.RootDir, consts.ExtensionsDirName),
-		"aliases":      filepath.Join(runningServerConfig.RootDir, consts.AliasesDirName),
-		"signatures":   filepath.Join(runningServerConfig.RootDir, consts.SignaturesDirName),
-		"certificates": filepath.Join(runningServerConfig.RootDir, consts.CertificatesDirName),
-	}
-	bundleFileName := filepath.Join(runningServerConfig.RootDir, consts.BundlesFileName)
-
-	// Make sure the root directory is created first if it does not exist
-	err = checkAndCreateDirectory("root", runningServerConfig.RootDir)
-	if err != nil {
-		return err
-	}
-
-	for name, dir := range directories {
-		err = checkAndCreateDirectory(name, dir)
+	if runningServerConfig.StorageProvider != nil {
+		storagePaths, err := runningServerConfig.StorageProvider.Paths()
 		if err != nil {
-			return err
+			return ErrServerNotInitialized
 		}
+		configPath = storagePaths.Config
 	}
 
-	fmt.Printf(Info+"Creating default bundle information file: %s\n", bundleFileName)
-	err = os.WriteFile(bundleFileName, []byte(`[]`), 0644)
-	if err != nil {
-		return err
+	if configPath != "" {
+		fmt.Printf(Info+"Generating configuration: %s\n", configPath)
+	} else {
+		fmt.Printf(Info + "Generating configuration\n")
 	}
 
 	if !slices.Contains(flagsChanged, consts.DomainFlagStr) {
 		domain, domainEnvSet := os.LookupEnv(consts.DomainEnvVar)
 		if !domainEnvSet {
-			survey.AskOne(&survey.Input{Message: "IP or domain name for clients to reach the armory (or blank for the internal IP of this host):"}, &domain)
+			err = survey.AskOne(&survey.Input{Message: "IP or domain name for clients to reach the armory (or blank for the internal IP of this host):"}, &domain)
+			if err != nil {
+				return err
+			}
 		} else {
 			domain = strings.Trim(domain, "\"")
 		}
@@ -319,9 +304,8 @@ func runSetup(flagsChanged []string) error {
 		runningServerConfig.ListenPort = getListeningPort()
 	}
 
+	// If this is the first setup, we still need to get the certificates from the user
 	runningServerConfig.TLSEnabled = checkIfTLSEnabled()
-
-	fmt.Printf(Info+"Generating default configuration: %s\n", filepath.Join(runningServerConfig.RootDir, consts.ConfigFileName))
 
 	err = getAndStoreSigningKey()
 	if err != nil {
@@ -329,47 +313,40 @@ func runSetup(flagsChanged []string) error {
 	}
 
 	clientToken := ""
-	clientTokenDigest := ""
-	enableClientAuth := false
+	disableClientAuth := runningServerConfig.ClientAuthenticationDisabled
 
 	// This is a bit confusing, but if the disable auth flag was changed, then the user wants to disable auth
 	if !slices.Contains(flagsChanged, consts.DisableAuthFlagStr) {
 		authChoiceEnv, authEnvSet := os.LookupEnv(consts.AuthEnabledEnvVar)
 		if !authEnvSet {
-			enableClientAuth = userConfirm("Enable client authentication?")
+			disableClientAuth = userConfirm("Disable client authentication?")
 		} else {
-			if authChoiceEnv == "1" {
-				enableClientAuth = true
+			if authChoiceEnv != "1" {
+				disableClientAuth = true
 			}
 		}
-	} else {
-		enableClientAuth = true
 	}
 
-	if enableClientAuth {
-		clientToken, clientTokenDigest = randomAuthorizationToken()
+	runningServerConfig.ClientAuthenticationDisabled = disableClientAuth
+
+	if !disableClientAuth {
+		clientToken = generateClientToken()
 	}
-	runningServerConfig.ClientAuthenticationDisabled = !enableClientAuth
-	runningServerConfig.ClientAuthorizationTokenDigest = clientTokenDigest
 
 	adminToken, adminTokenDigest := randomAuthorizationToken()
 	runningServerConfig.AdminAuthorizationTokenDigest = adminTokenDigest
 
-	serverConfigData, _ := json.MarshalIndent(runningServerConfig, "", "  ")
-	os.WriteFile(filepath.Join(runningServerConfig.RootDir, consts.ConfigFileName), serverConfigData, 0660)
+	err = writeServerConfig()
+	if err != nil {
+		return err
+	}
 
 	fmt.Println()
 	pubKey, err := runningServerConfig.SigningKeyProvider.PublicKey()
 	if err != nil {
 		return err
 	}
-	userConfig, _ := json.MarshalIndent(&ArmoryClientConfig{
-		PublicKey:     pubKey,
-		RepoURL:       runningServerConfig.RepoURL() + "/" + path.Join("armory", "index"),
-		Authorization: clientToken,
-	}, "", "    ")
-	fmt.Printf(Bold + "*** THIS WILL ONLY BE SHOWN ONCE ***\n")
-	fmt.Printf(Bold+">>> User Config:%s\n%s\n\n", Normal, userConfig)
+	showClientConfig(pubKey, clientToken)
 	fmt.Printf(Bold+">>> Admin Authentication Token (use this for adding, modifying, and deleting packages): %s\n%s\n", Normal, adminToken)
 
 	return nil
@@ -404,13 +381,15 @@ func getPathToFileFromUser(prompt string) (string, error) {
 
 // Determines whether TLS is enabled, either by asking the user or looking at the TLS key files in their expected locations
 func checkIfTLSEnabled() bool {
+	if runningServerConfig == nil {
+		return false
+	}
+
 	var err error
 	enableTLS := false
 
 	// Look for the TLS key and cert
 	tlsEnabledEnv, tlsEnabledSet := os.LookupEnv(consts.TLSEnabledEnvVar)
-	defaultTLSKeyLocation := filepath.Join(runningServerConfig.RootDir, consts.TLSKeyPathFromRoot)
-	defaultTLSCertLocation := filepath.Join(runningServerConfig.RootDir, consts.TLSCertPathFromRoot)
 
 	if tlsEnabledSet {
 		if tlsEnabledEnv != "1" {
@@ -418,10 +397,10 @@ func checkIfTLSEnabled() bool {
 		}
 	}
 
-	fileInfo, err := os.Stat(defaultTLSKeyLocation)
+	keyData, err := runningServerConfig.StorageProvider.ReadTLSCertificateKey()
 
-	if os.IsNotExist(err) {
-		enableTLS = userConfirm("Enable TLS?")
+	if errors.Is(err, storage.ErrDoesNotExist) {
+		enableTLS = userConfirm("The TLS key does not exist in the expected location. Enable TLS?")
 		if !enableTLS {
 			return enableTLS
 		} else {
@@ -430,30 +409,49 @@ func checkIfTLSEnabled() bool {
 				// Ctrl-C is returned as an error, so if we encounter any errors, then bail
 				return enableTLS
 			}
-			err = util.CopyFile(tlsKeyPath, defaultTLSKeyLocation)
+			userKeyData, err := os.ReadFile(tlsKeyPath)
 			if err != nil {
-				fmt.Printf(Warn+"Could not copy TLS key file from %s to %s: %s. TLS will be disabled", tlsKeyPath, defaultTLSKeyLocation, err)
+				fmt.Printf(Warn+"Could not read TLS key file from %s: %s. TLS will be disabled", tlsKeyPath, err)
+				return enableTLS
+			}
+			err = runningServerConfig.StorageProvider.WriteTLSCertificateKey(userKeyData)
+			if err != nil {
+				fmt.Printf(Warn+"Could not copy TLS key file from %s to storage provider: %s. TLS will be disabled", tlsKeyPath, err)
 				return enableTLS
 			}
 		}
-	} else if fileInfo.Size() == 0 {
+	} else if err != nil {
+		fmt.Printf(Warn+"Disabling TLS: could not read TLS key from storage provider: %s\n", err)
+		return enableTLS
+	} else if len(keyData) == 0 {
 		// Then the TLS key is an empty file, so we will disable TLS
+		fmt.Println(Warn + "Disabling TLS: TLS private key is empty")
 		return enableTLS
 	}
 
-	fileInfo, err = os.Stat(defaultTLSCertLocation)
-	if os.IsNotExist(err) {
+	crtData, err := runningServerConfig.StorageProvider.ReadTLSCertificateCrt()
+
+	if errors.Is(err, storage.ErrDoesNotExist) {
 		tlsCertPath, err := getPathToFileFromUser("Path to TLS certificate file (Ctrl-C to cancel):")
 		if err != nil {
 			return enableTLS
 		}
-		err = util.CopyFile(tlsCertPath, defaultTLSCertLocation)
+		userCrtData, err := os.ReadFile(tlsCertPath)
 		if err != nil {
-			fmt.Printf(Warn+"Could not copy TLS key file from %s to %s: %s. TLS will be disabled", tlsCertPath, defaultTLSKeyLocation, err)
+			fmt.Printf(Warn+"Could not read TLS certificate file from %s: %s. TLS will be disabled", tlsCertPath, err)
 			return enableTLS
 		}
-	} else if fileInfo.Size() == 0 {
-		// Without a valid key, we cannot enable TLS
+		err = runningServerConfig.StorageProvider.WriteTLSCertificateCrt(userCrtData)
+		if err != nil {
+			fmt.Printf(Warn+"Could not copy TLS certificate file from %s to storage provider: %s. TLS will be disabled", tlsCertPath, err)
+			return enableTLS
+		}
+	} else if err != nil {
+		fmt.Printf(Warn+"Disabling TLS: could not read TLS cert from storage provider: %s\n", err)
+		return enableTLS
+	} else if len(crtData) == 0 {
+		// Without a valid cert, we cannot enable TLS
+		fmt.Println(Warn + "Disabling TLS: TLS cert is empty")
 		return enableTLS
 	}
 
@@ -487,7 +485,7 @@ func userConfirm(msg string) bool {
 	return confirmed
 }
 
-func getDefaultRootDir() (string, error) {
+func getDefaultLocalRootDir() (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", err
@@ -495,7 +493,69 @@ func getDefaultRootDir() (string, error) {
 	return filepath.Join(cwd, consts.ArmoryRootDirName), nil
 }
 
-func getRootDir(cmd *cobra.Command) (string, error) {
+func initializeStorageProviderFromPath(path string) (storage.StorageProvider, error) {
+	var storageProvider storage.StorageProvider
+	var tempServerConfig api.ArmoryServerConfig
+
+	parsedPath, err := url.Parse(path)
+	if err != nil {
+		return nil, fmt.Errorf("could not parse path %q: %s", path, err)
+	}
+
+	switch parsedPath.Scheme {
+	case consts.AWSS3StorageProviderStr:
+		// Not implemented yet
+		fallthrough
+	case "", "file":
+		var localPath string
+		// Then the path provided is on the local file system - we need to determine if it is a config file or a directory
+		pathInfo, err := os.Stat(parsedPath.Path)
+		if err != nil {
+			return nil, fmt.Errorf("could not get info about %q: %s", path, err)
+		}
+		if !pathInfo.IsDir() {
+			configData, err := os.ReadFile(parsedPath.Path)
+			if err != nil {
+				return nil, fmt.Errorf("could not read file %q: %s", path, err)
+			}
+			err = json.Unmarshal(configData, &tempServerConfig)
+			if err != nil {
+				// Something was wrong with the config file, the user will have to fix it or re-run setup
+				return nil, fmt.Errorf("error parsing config file %q: %s", path, err)
+			}
+			localPath = tempServerConfig.RootDir
+			if localPath == "" {
+				return nil, fmt.Errorf("no root directory specified in configuration file %q", path)
+			}
+		} else {
+			localPath = path
+		}
+		storageProvider = &storage.LocalStorageProvider{}
+		err = storageProvider.New(localPath, true)
+		if err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("%s is not a supported storage provider", parsedPath.Scheme)
+	}
+
+	return storageProvider, nil
+}
+
+func getStorageProvider(cmd *cobra.Command) (storage.StorageProvider, string, error) {
+	var storageProvider storage.StorageProvider
+
+	// Get the config path or root dir to try to bootstrap the storage provider
+	configPath, err := cmd.Flags().GetString(consts.ConfigFlagStr)
+	if err != nil {
+		return nil, "", fmt.Errorf("error parsing flag --%s, %s", consts.ConfigFlagStr, err)
+	}
+	if configPath != "" {
+		// Attempt to bootstrap the storage provider from the config file
+		storageProvider, err = initializeStorageProviderFromPath(configPath)
+		return storageProvider, configPath, err
+	}
+
 	rootDir, err := cmd.Flags().GetString(consts.RootDirFlagStr)
 	if err != nil {
 		// This usually happens if the cmd does not have a root-dir flag, so unless a config has been specified, assume the default root dir
@@ -503,9 +563,37 @@ func getRootDir(cmd *cobra.Command) (string, error) {
 		// that does not live in the default root dir, they should be passing a config file
 		rootDir = ""
 	}
+
 	if rootDir == "" {
-		return getDefaultRootDir()
-	} else {
-		return rootDir, nil
+		rootDir, err = getDefaultLocalRootDir()
+		if err != nil {
+			return nil, "", err
+		}
 	}
+
+	// Determine what type of provider to set up based on the path passed in
+	parsedDirPath, err := url.Parse(rootDir)
+	if err != nil {
+		return nil, "", fmt.Errorf("could not parse root directory path: %s", err)
+	}
+	switch parsedDirPath.Scheme {
+	case consts.AWSS3StorageProviderStr:
+		// Not implemented yet
+		fallthrough
+	case "", "file":
+		storageProvider = &storage.LocalStorageProvider{}
+		err = storageProvider.New(parsedDirPath.Path, true)
+		if err != nil {
+			return nil, "", err
+		}
+	default:
+		return nil, "", fmt.Errorf("%s is not a supported storage provider", parsedDirPath.Scheme)
+	}
+
+	providerPaths, err := storageProvider.Paths()
+	if err != nil {
+		return nil, "", err
+	}
+	runningServerConfig.RootDir = storageProvider.BasePath()
+	return storageProvider, providerPaths.Config, nil
 }

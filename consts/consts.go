@@ -1,5 +1,7 @@
 package consts
 
+import "os"
+
 /*
 	Sliver Implant Framework
 	Copyright (C) 2022  Bishop Fox
@@ -21,20 +23,24 @@ package consts
 type PackageType int
 
 const (
-	ArmoryRootDirName         = "armory-data"
-	ExtensionsDirName         = "extensions"
-	AliasesDirName            = "aliases"
-	BundlesFileName           = "bundles.json"
-	ConfigFileName            = "config.json"
-	CertificatesDirName       = "certificates"
-	TLSKeyPathFromRoot        = CertificatesDirName + "/armory.key"
-	TLSCertPathFromRoot       = CertificatesDirName + "/armory.crt"
-	DefaultListenPort         = 8888
-	DefaultAWSRegion          = "us-west-2"
-	LocalSigningKeyName       = "private.key"
-	VaultCAPathFromRoot       = CertificatesDirName + "/armory-vault-ca.pem"
-	AliasManifestFileName     = "alias.json"
-	ExtensionManifestFileName = "extension.json"
+	ArmoryRootDirName                = "armory-data"
+	ExtensionsDirName                = "extensions"
+	AliasesDirName                   = "aliases"
+	BundlesFileName                  = "bundles.json"
+	ConfigFileName                   = "config.json"
+	CertificatesDirName              = "certificates"
+	TLSKeyPathFromRoot               = CertificatesDirName + string(os.PathSeparator) + "armory.key"
+	TLSCertPathFromRoot              = CertificatesDirName + string(os.PathSeparator) + "armory.crt"
+	DefaultListenPort                = 8888
+	DefaultAWSRegion                 = "us-west-2"
+	LocalSigningKeyName              = "private.key"
+	VaultCAPathFromRoot              = CertificatesDirName + string(os.PathSeparator) + "armory-vault-ca.pem"
+	AliasManifestFileName            = "alias.json"
+	AliasArchiveManifestFilePath     = "./" + AliasManifestFileName
+	ExtensionManifestFileName        = "extension.json"
+	ExtensionArchiveManifestFilePath = "./" + ExtensionManifestFileName
+	AppLogName                       = "app"
+	AccessLogName                    = "access"
 
 	// Command line flags
 	LhostFlagStr        = "lhost"
@@ -51,6 +57,7 @@ const (
 	PasswordFlagStr     = "password"
 	PasswordFileFlagStr = "password-file"
 	KeyFlagStr          = "key"
+	UpdateConfigFlagStr = "update"
 
 	RootDirFlagStr = "root-dir"
 
@@ -64,6 +71,7 @@ const (
 	// AWS
 	AWSSigningKeySecretNameFlagStr = "aws-key-name"
 	AWSRegionFlagStr               = "aws-region"
+	AWSS3StorageProviderStr        = "s3"
 
 	// Vault
 	VaultURLFlagStr         = "vault-url"
@@ -114,4 +122,5 @@ const (
 	// Package types
 	AliasPackageType PackageType = iota
 	ExtensionPackageType
+	UnknownPackageType
 )

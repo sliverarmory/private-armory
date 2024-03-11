@@ -23,71 +23,14 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
 	"path"
-	"path/filepath"
-	"strings"
 
 	"github.com/sliverarmory/external-armory/api"
+	"github.com/sliverarmory/external-armory/api/storage"
 	"github.com/sliverarmory/external-armory/consts"
 	"github.com/sliverarmory/external-armory/log"
-	"github.com/sliverarmory/external-armory/util"
 	"github.com/spf13/cobra"
 )
-
-type ExtensionManifest struct {
-	Name            string               `json:"name"`
-	CommandName     string               `json:"command_name"`
-	Version         string               `json:"version"`
-	ExtensionAuthor string               `json:"extension_author"`
-	OriginalAuthor  string               `json:"original_author"`
-	RepoURL         string               `json:"repo_url"`
-	Help            string               `json:"help"`
-	LongHelp        string               `json:"long_help"`
-	Files           []*extensionFile     `json:"files"`
-	Arguments       []*extensionArgument `json:"arguments"`
-	Entrypoint      string               `json:"entrypoint"`
-	DependsOn       string               `json:"depends_on"`
-	Init            string               `json:"init"`
-}
-
-type extensionFile struct {
-	OS   string `json:"os"`
-	Arch string `json:"arch"`
-	Path string `json:"path"`
-}
-
-type extensionArgument struct {
-	Name     string `json:"name"`
-	Type     string `json:"type"`
-	Desc     string `json:"desc"`
-	Optional bool   `json:"optional"`
-}
-
-// AliasFile - An OS/Arch specific file
-type AliasFile struct {
-	OS   string `json:"os"`
-	Arch string `json:"arch"`
-	Path string `json:"path"`
-}
-
-// AliasManifest - The manifest for an alias, contains metadata
-type AliasManifest struct {
-	Name           string `json:"name"`
-	Version        string `json:"version"`
-	CommandName    string `json:"command_name"`
-	OriginalAuthor string `json:"original_author"`
-	RepoURL        string `json:"repo_url"`
-	Help           string `json:"help"`
-	LongHelp       string `json:"long_help"`
-
-	Entrypoint   string       `json:"entrypoint"`
-	AllowArgs    bool         `json:"allow_args"`
-	DefaultArgs  string       `json:"default_args"`
-	Files        []*AliasFile `json:"files"`
-	IsReflective bool         `json:"is_reflective"`
-	IsAssembly   bool         `json:"is_assembly"`
-}
 
 var refreshCmd = &cobra.Command{
 	Use:   "refresh",
@@ -99,7 +42,11 @@ var refreshCmd = &cobra.Command{
 			fmt.Printf("%s\n", err)
 			return
 		}
-		appLog := log.GetAppLogger(runningServerConfig.RootDir)
+		appLogFile, err := runningServerConfig.StorageProvider.GetLogger(consts.AppLogName)
+		if err != nil {
+			panic(fmt.Sprintf("Failed to open app log: %v", err))
+		}
+		appLog := log.StartLogger(appLogFile)
 		fmt.Printf(Info + "Refreshing armory index ...\n")
 		errors := refreshArmoryIndex()
 		if len(errors) > 0 {
@@ -115,6 +62,14 @@ var refreshCmd = &cobra.Command{
 }
 
 func signArmoryIndex(data []byte) error {
+	if runningServerConfig == nil {
+		return ErrServerNotInitialized
+	} else if runningServerConfig.SigningKeyProvider == nil {
+		return ErrSigningProviderNotInitialized
+	} else if runningServerConfig.StorageProvider == nil {
+		return ErrStorageProviderNotInitialized
+	}
+
 	sig, err := runningServerConfig.SigningKeyProvider.SignIndex(data)
 	if err != nil {
 		return fmt.Errorf("failed to sign armory index: %s", err)
@@ -123,7 +78,7 @@ func signArmoryIndex(data []byte) error {
 		// Then presumably the index was signed externally
 		return nil
 	}
-	err = os.WriteFile(filepath.Join(runningServerConfig.RootDir, consts.ArmoryIndexSigFileName), sig, 0644)
+	err = runningServerConfig.StorageProvider.WriteIndexSignature(sig)
 	if err != nil {
 		return fmt.Errorf("failed to write armory index signature: %s", err)
 	}
@@ -131,7 +86,14 @@ func signArmoryIndex(data []byte) error {
 }
 
 func refreshArmoryIndex() []error {
-	allErrors := []error{}
+	if runningServerConfig == nil {
+		return []error{ErrServerNotInitialized}
+	} else if runningServerConfig.SigningKeyProvider == nil {
+		return []error{ErrSigningProviderNotInitialized}
+	}
+
+	var index *api.ArmoryIndex
+	var allErrors []error
 
 	if !runningServerConfig.SigningKeyProvider.Initialized() {
 		return []error{errors.New("cannot refresh armory index since no package signing key has been loaded")}
@@ -142,9 +104,9 @@ func refreshArmoryIndex() []error {
 		return []error{fmt.Errorf("failed to retrieve public key from server configuration: %s", err)}
 	}
 
-	index, err := generateArmoryIndex()
-	if err != nil {
-		return []error{fmt.Errorf("failed to generate armory index: %s", err)}
+	index, allErrors = generateArmoryIndex()
+	if len(allErrors) != 0 {
+		return allErrors
 	}
 	for _, entry := range index.Aliases {
 		entry.PublicKey = publicKey
@@ -167,7 +129,7 @@ func refreshArmoryIndex() []error {
 		allErrors = append(allErrors, fmt.Errorf("failed to marshal armory index: %s", err))
 		return allErrors
 	}
-	err = os.WriteFile(filepath.Join(runningServerConfig.RootDir, consts.ArmoryIndexFileName), data, 0644)
+	err = runningServerConfig.StorageProvider.WriteIndex(data)
 	if err != nil {
 		allErrors = append(allErrors, fmt.Errorf("failed to write armory index: %s", err))
 		return allErrors
@@ -179,188 +141,104 @@ func refreshArmoryIndex() []error {
 	return allErrors
 }
 
-func signFile(manifest []byte, fileToSign string) error {
-	if runningServerConfig.SigningKeyProvider == nil {
-		return fmt.Errorf("a signing key provider is not available, so the package manifest cannot be signed")
+func signFile(manifest, fileDataToSign []byte) ([]byte, error) {
+	if runningServerConfig == nil {
+		return nil, ErrServerNotInitialized
+	} else if runningServerConfig.SigningKeyProvider == nil {
+		return nil, errors.New("a signing key provider is not available, so the package manifest cannot be signed")
 	}
-	sigPath := filepath.Join(runningServerConfig.RootDir,
-		consts.SignaturesDirName,
-		filepath.Base(strings.TrimSuffix(fileToSign, ".tar.gz")),
-	)
-	data, err := os.ReadFile(fileToSign)
+
+	sigData, err := runningServerConfig.SigningKeyProvider.SignPackage(fileDataToSign, manifest)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	sigData, err := runningServerConfig.SigningKeyProvider.SignPackage(data, manifest)
-	if err != nil {
-		return err
-	}
-	if sigData == nil {
-		// Then presumably the package was already signed externally
-		return nil
-	}
-	err = os.WriteFile(sigPath, sigData, 0o644)
-	return err
+	return sigData, err
 }
 
 // GenerateArmoryIndex - Generate the armory index
-func generateArmoryIndex() (*api.ArmoryIndex, error) {
+func generateArmoryIndex() (*api.ArmoryIndex, []error) {
 	if runningServerConfig == nil {
-		return nil, errors.New("the server is not configured, so an index cannot be generated")
-	}
-	if runningServerConfig.SigningKeyProvider == nil {
-		return nil, errors.New("a signing key provider is not available, so an index cannot be generated")
-	}
-	aliases, aliasManifests, err := getAliases()
-	if err != nil {
-		return nil, err
-	}
-	for commandName, data := range aliasManifests {
-		fileToSign := filepath.Join(runningServerConfig.RootDir, consts.AliasesDirName, fmt.Sprintf("%s.tar.gz", commandName))
-		err = signFile(data, fileToSign)
-		if err != nil {
-			return nil, err
-		}
+		return nil, []error{errors.New("the server is not configured, so an index cannot be generated")}
+	} else if runningServerConfig.SigningKeyProvider == nil {
+		return nil, []error{errors.New("a signing key provider is not available, so an index cannot be generated")}
+	} else if runningServerConfig.StorageProvider == nil {
+		return nil, []error{ErrStorageProviderNotInitialized}
 	}
 
-	extensions, extensionManifests, err := getExtensions()
-	if err != nil {
-		return nil, err
+	var allErr []error
+	aliasEntries := []*api.ArmoryEntry{}
+	extensionEntries := []*api.ArmoryEntry{}
+
+	aliasData, allErr := runningServerConfig.StorageProvider.ListPackages(consts.AliasPackageType)
+	if len(allErr) != 0 {
+		return nil, allErr
 	}
-	for commandName, data := range extensionManifests {
-		fileToSign := filepath.Join(runningServerConfig.RootDir, consts.ExtensionsDirName, fmt.Sprintf("%s.tar.gz", commandName))
-		err = signFile(data, fileToSign)
+	for aliasName, aliasEntry := range aliasData {
+		fileDataToSign, err := runningServerConfig.StorageProvider.ReadPackage(aliasName)
 		if err != nil {
-			return nil, err
+			allErr = append(allErr, err)
+			continue
 		}
+		packageSignature, err := signFile(aliasEntry.ManifestData, fileDataToSign)
+		if err != nil {
+			allErr = append(allErr, err)
+			continue
+		}
+		err = runningServerConfig.StorageProvider.WritePackageSignature(aliasName, packageSignature)
+		if err != nil {
+			allErr = append(allErr, err)
+			continue
+		}
+		aliasEntries = append(aliasEntries, &api.ArmoryEntry{
+			Name:        aliasEntry.Name,
+			CommandName: aliasEntry.CommandName,
+		})
+	}
+
+	extensionManifests, allErr := runningServerConfig.StorageProvider.ListPackages(consts.ExtensionPackageType)
+	if len(allErr) != 0 {
+		return nil, allErr
+	}
+
+	for extensionName, extensionEntry := range extensionManifests {
+		fileDataToSign, err := runningServerConfig.StorageProvider.ReadPackage(extensionName)
+		if err != nil {
+			allErr = append(allErr, err)
+			continue
+		}
+		packageSignature, err := signFile(extensionEntry.ManifestData, fileDataToSign)
+		if err != nil {
+			allErr = append(allErr, err)
+			continue
+		}
+		err = runningServerConfig.StorageProvider.WritePackageSignature(extensionName, packageSignature)
+		if err != nil {
+			allErr = append(allErr, err)
+			continue
+		}
+		extensionEntries = append(extensionEntries, &api.ArmoryEntry{
+			Name:        extensionEntry.Name,
+			CommandName: extensionEntry.CommandName,
+		})
 	}
 
 	bundles, err := getBundles()
 	if err != nil {
-		return nil, err
+		allErr = append(allErr, err)
+		return nil, allErr
 	}
 	return &api.ArmoryIndex{
-		Aliases:    aliases,
-		Extensions: extensions,
+		Aliases:    aliasEntries,
+		Extensions: extensionEntries,
 		Bundles:    bundles,
 	}, nil
 }
 
-func getAliases() ([]*api.ArmoryEntry, map[string][]byte, error) {
-	appLog := log.GetAppLogger(runningServerConfig.RootDir)
-	aliasesPath := filepath.Join(runningServerConfig.RootDir, consts.AliasesDirName)
-	appLog.Infof("Looking for aliases in %s", aliasesPath)
-	if _, err := os.Stat(aliasesPath); os.IsNotExist(err) {
-		appLog.Errorf("Failed to find aliases: %s", err)
-		return nil, nil, err
-	}
-	fi, err := os.ReadDir(aliasesPath)
-	if err != nil {
-		appLog.Errorf("Failed to find aliases: %s", err)
-		return nil, nil, err
-	}
-
-	entries := []*api.ArmoryEntry{}
-	manifests := map[string][]byte{}
-
-	for _, entry := range fi {
-		archivePath := filepath.Join(aliasesPath, entry.Name())
-		if entry.IsDir() {
-			appLog.Debugf("%v is a directory (skip)", entry)
-			continue
-		}
-		if !strings.HasSuffix(entry.Name(), ".tar.gz") {
-			appLog.Debugf("%v not a .tar.gz file (skip)", entry)
-			continue
-		}
-		manifestData, err := util.ReadFileFromTarGz(archivePath, consts.AliasManifestFileName)
-		if err != nil {
-			appLog.Errorf("Failed to read alias.json from '%s': %s", entry.Name(), err)
-			continue
-		}
-		manifest := &AliasManifest{}
-		err = json.Unmarshal(manifestData, manifest)
-		if err != nil {
-			appLog.Errorf("Error parsing alias manifest for '%s': %s", entry.Name(), err)
-			continue
-		}
-		if strings.TrimSuffix(entry.Name(), ".tar.gz") != manifest.CommandName {
-			appLog.Errorf("Invalid file name '%s' expected '%s'",
-				entry.Name(), fmt.Sprintf("%s.tar.gz", manifest.CommandName),
-			)
-			continue
-		}
-		entries = append(entries, &api.ArmoryEntry{
-			Name:        manifest.Name,
-			CommandName: manifest.CommandName,
-			RepoURL:     "",
-			PublicKey:   "",
-		})
-		manifests[manifest.CommandName] = manifestData
-	}
-	return entries, manifests, nil
-}
-
-func getExtensions() ([]*api.ArmoryEntry, map[string][]byte, error) {
-	appLog := log.GetAppLogger(runningServerConfig.RootDir)
-	extensionsPath := filepath.Join(runningServerConfig.RootDir, consts.ExtensionsDirName)
-	appLog.Infof("Looking for extensions in %s", extensionsPath)
-	if _, err := os.Stat(extensionsPath); os.IsNotExist(err) {
-		appLog.Errorf("Failed to find extensions: %s", err)
-		return nil, nil, err
-	}
-	fi, err := os.ReadDir(extensionsPath)
-	if err != nil {
-		appLog.Errorf("Failed to find extensions: %s", err)
-		return nil, nil, err
-	}
-
-	entries := []*api.ArmoryEntry{}
-	manifests := map[string][]byte{}
-
-	for _, entry := range fi {
-		archivePath := filepath.Join(extensionsPath, entry.Name())
-		if entry.IsDir() {
-			appLog.Debugf("%v is a directory (skip)", entry)
-			continue
-		}
-		if !strings.HasSuffix(entry.Name(), ".tar.gz") {
-			appLog.Debugf("%v not a .tar.gz file (skip)", entry)
-			continue
-		}
-		manifestData, err := util.ReadFileFromTarGz(archivePath, consts.ExtensionManifestFileName)
-		if err != nil {
-			appLog.Errorf("Failed to read extension.json from '%s': %s", entry.Name(), err)
-			continue
-		}
-		manifest := &ExtensionManifest{}
-		err = json.Unmarshal(manifestData, manifest)
-		if err != nil {
-			appLog.Errorf("Error parsing extension manifest for '%s': %s", entry.Name(), err)
-			continue
-		}
-		if strings.TrimSuffix(entry.Name(), ".tar.gz") != manifest.CommandName {
-			appLog.Errorf("Invalid file name '%s' expected '%s'",
-				entry.Name(), fmt.Sprintf("%s.tar.gz", manifest.CommandName),
-			)
-			continue
-		}
-		entries = append(entries, &api.ArmoryEntry{
-			Name:        manifest.Name,
-			CommandName: manifest.CommandName,
-			RepoURL:     "",
-			PublicKey:   "",
-		})
-		manifests[manifest.CommandName] = manifestData
-	}
-	return entries, manifests, nil
-}
-
 func getBundles() ([]*api.ArmoryBundle, error) {
 	bundles := []*api.ArmoryBundle{}
-	bundleData, err := os.ReadFile(filepath.Join(runningServerConfig.RootDir, consts.BundlesFileName))
+	bundleData, err := runningServerConfig.StorageProvider.ReadBundleFile()
 	if err != nil {
-		if !os.IsNotExist(err) {
+		if !errors.Is(err, storage.ErrDoesNotExist) {
 			return nil, err
 		} else {
 			return bundles, nil

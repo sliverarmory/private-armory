@@ -43,12 +43,12 @@ func (esp *ExternalSigningProvider) New(ski SigningKeyInfo) error {
 	esp.initialized = false
 	esp.name = consts.SigningKeyProviderExternal
 
-	keyInfoLocal, ok := ski.(*ExternalSigningKeyInfo)
+	keyInfoExternal, ok := ski.(*ExternalSigningKeyInfo)
 	if !ok {
 		return errors.New("incorrect key information provided")
 	}
 
-	esp.publicKey = keyInfoLocal.PublicKey
+	esp.publicKey = keyInfoExternal.PublicKey
 	if esp.publicKey == "" {
 		return errors.New("public key not provided")
 	}
