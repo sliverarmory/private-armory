@@ -175,6 +175,26 @@ var rootCmd = &cobra.Command{
 			}
 		}
 
+		// Set up TLS
+		var tlsCertPair tls.Certificate
+		tlsSetup := false
+
+		if server.ArmoryServerConfig.TLSEnabled {
+			certData, err := runningServerConfig.StorageProvider.ReadTLSCertificateCrt()
+			if err != nil {
+				appLog.Warnf("Error getting TLS certificate from storage provider: %s", err)
+			}
+			keyData, err := runningServerConfig.StorageProvider.ReadTLSCertificateKey()
+			if err != nil {
+				appLog.Warnf("Error getting TLS key from storage provider: %s", err)
+			}
+			tlsCertPair, err = tls.X509KeyPair(certData, keyData)
+			if err != nil {
+				appLog.Warnf("Error validating TLS key pair: %s", err)
+			}
+			tlsSetup = true
+		}
+
 		// Watcher
 		// Receive events from the storage provider
 		eventChannel, errorChannel, err := runningServerConfig.StorageProvider.AutoRefreshChannels()
@@ -207,24 +227,10 @@ var rootCmd = &cobra.Command{
 			}()
 		}
 
-		// Set up TLS
-		var tlsCertPair tls.Certificate
-		tlsSetup := false
-
-		if server.ArmoryServerConfig.TLSEnabled {
-			certData, err := runningServerConfig.StorageProvider.ReadTLSCertificateCrt()
-			if err != nil {
-				appLog.Warnf("Error getting TLS certificate from storage provider: %s", err)
-			}
-			keyData, err := runningServerConfig.StorageProvider.ReadTLSCertificateKey()
-			if err != nil {
-				appLog.Warnf("Error getting TLS key from storage provider: %s", err)
-			}
-			tlsCertPair, err = tls.X509KeyPair(certData, keyData)
-			if err != nil {
-				appLog.Warnf("Error validating TLS key pair: %s", err)
-			}
-			tlsSetup = true
+		// Refresh the index so that we have the most up to date index before the server starts
+		errors := refreshArmoryIndex()
+		for _, err := range errors {
+			appLog.Errorln(err)
 		}
 
 		go func() {
