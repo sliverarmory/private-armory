@@ -75,7 +75,7 @@ func init() {
 	rootCmd.MarkFlagFilename(consts.ConfigFileName, "json")
 
 	rootCmd.Flags().BoolP(consts.UpdateConfigFlagStr, "u", false, "Update server config file based on command line arguments and environment variables")
-	rootCmd.Flags().BoolP(consts.DisableAuthFlagStr, "A", false, "Disable authentication token checks")
+	rootCmd.Flags().BoolP(consts.DisableAuthFlagStr, "a", false, "Enable authentication token checks")
 	rootCmd.Flags().StringP(consts.LhostFlagStr, "l", "", "Listen host")
 	rootCmd.Flags().Uint16P(consts.LportFlagStr, "p", 8888, "Listen port")
 	rootCmd.Flags().StringP(consts.ReadTimeoutFlagStr, "R", "1m", "HTTP read timeout expressed as a duration")
@@ -195,10 +195,38 @@ var rootCmd = &cobra.Command{
 			tlsSetup = true
 		}
 
+<<<<<<< HEAD
+		// Set up TLS
+		var tlsCertPair tls.Certificate
+		tlsSetup := false
+
+		if server.ArmoryServerConfig.TLSEnabled {
+			certData, err := runningServerConfig.StorageProvider.ReadTLSCertificateCrt()
+			if err != nil {
+				appLog.Warnf("Error getting TLS certificate from storage provider: %s", err)
+			}
+			keyData, err := runningServerConfig.StorageProvider.ReadTLSCertificateKey()
+			if err != nil {
+				appLog.Warnf("Error getting TLS key from storage provider: %s", err)
+			}
+			tlsCertPair, err = tls.X509KeyPair(certData, keyData)
+			if err != nil {
+				appLog.Warnf("Error validating TLS key pair: %s", err)
+			}
+			tlsSetup = true
+		}
+
+=======
+>>>>>>> a4366b0 (Abstracting storage backends)
 		// Watcher
 		// Receive events from the storage provider
 		eventChannel, errorChannel, err := runningServerConfig.StorageProvider.AutoRefreshChannels()
 		if err != nil {
+			appLog.Warnf("Package watcher was not initialized. The index will have to be refreshed manually. Error: %s", err)
+		} else if eventChannel == nil || errorChannel == nil {
+			appLog.Warnln("Storage provider does not support auto package refreshing. The index will have to be refreshed manually.")
+		} else {
+			appLog.Infoln("Package watcher initialized")
 			appLog.Warnf("Package watcher was not initialized. The index will have to be refreshed manually. Error: %s", err)
 		} else if eventChannel == nil || errorChannel == nil {
 			appLog.Warnln("Storage provider does not support auto package refreshing. The index will have to be refreshed manually.")
