@@ -255,12 +255,6 @@ var rootCmd = &cobra.Command{
 			}()
 		}
 
-		// Refresh the index so that we have the most up to date index before the server starts
-		errors := refreshArmoryIndex()
-		for _, err := range errors {
-			appLog.Errorln(err)
-		}
-
 		go func() {
 			var err error
 			if tlsSetup {
