@@ -75,7 +75,7 @@ func init() {
 	rootCmd.MarkFlagFilename(consts.ConfigFileName, "json")
 
 	rootCmd.Flags().BoolP(consts.UpdateConfigFlagStr, "u", false, "Update server config file based on command line arguments and environment variables")
-	rootCmd.Flags().BoolP(consts.DisableAuthFlagStr, "a", false, "Enable authentication token checks")
+	rootCmd.Flags().BoolP(consts.DisableAuthFlagStr, "A", false, "Disable authentication token checks")
 	rootCmd.Flags().StringP(consts.LhostFlagStr, "l", "", "Listen host")
 	rootCmd.Flags().Uint16P(consts.LportFlagStr, "p", 8888, "Listen port")
 	rootCmd.Flags().StringP(consts.ReadTimeoutFlagStr, "R", "1m", "HTTP read timeout expressed as a duration")
