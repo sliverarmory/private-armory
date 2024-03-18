@@ -27,6 +27,7 @@ import (
 	"os/signal"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	"github.com/sliverarmory/external-armory/api"
 	"github.com/sliverarmory/external-armory/api/storage"
 	"github.com/sliverarmory/external-armory/consts"
@@ -36,6 +37,7 @@ import (
 
 var (
 	runningServerConfig              *api.ArmoryServerConfig = nil
+	server                           *api.ArmoryServer       = nil
 	ErrServerNotInitialized                                  = errors.New("server not initialized - run setup first")
 	ErrSigningProviderNotInitialized                         = errors.New("signing key provider not initialized - run setup first")
 	ErrStorageProviderNotInitialized                         = errors.New("storage provider not initialized - run setup first")
@@ -122,6 +124,27 @@ func init() {
 	rootCmd.AddCommand(signCmd)
 }
 
+func shutdownServer() {
+	// Make sure to take care of any tasks that need to be done before the logs are closed
+	errors := runningServerConfig.StorageProvider.CloseLogger()
+	if len(errors) > 1 {
+		fmt.Println(Warn + "Encountered the following errors while shutting down loggers:")
+	} else if len(errors) == 1 {
+		fmt.Println(Warn + "Encountered the following error while shutting down loggers:")
+	}
+	for _, err := range errors {
+		fmt.Println(err)
+	}
+	err := runningServerConfig.StorageProvider.Close()
+	if err != nil {
+		fmt.Printf(Warn+"Encountered an error while shutting down the storage provider: %s\n", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	server.HTTPServer.Shutdown(ctx)
+}
+
 var rootCmd = &cobra.Command{
 	Use:   "armory-server",
 	Short: "Sliver armory server",
@@ -148,10 +171,11 @@ var rootCmd = &cobra.Command{
 			panic(fmt.Sprintf("Failed to open access log file: %v", err))
 		}
 		appLog := log.StartLogger(appLogFile)
-		server := api.New(runningServerConfig,
+		server = api.New(runningServerConfig,
 			appLog,
 			log.StartLogger(accessLogFile),
 		)
+		logrus.RegisterExitHandler(shutdownServer)
 		appLog.Infof("Starting with root dir: %s", runningServerConfig.StorageProvider.BasePath())
 
 		forceRefresh, err := cmd.Flags().GetBool(consts.RefreshFlagStr)
@@ -252,14 +276,13 @@ var rootCmd = &cobra.Command{
 			}
 		}()
 
+		fmt.Println(Info + "Armory started")
 		// Wait for signal to stop
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, os.Interrupt)
 		<-sig
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		server.HTTPServer.Shutdown(ctx)
-		os.Exit(0)
+		fmt.Println(Info + "Caught interrupt signal. Shutting down...")
+		logrus.Exit(0)
 	},
 }
 

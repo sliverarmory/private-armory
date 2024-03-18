@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"time"
 
 	"github.com/sliverarmory/external-armory/api"
@@ -111,7 +112,12 @@ func getConfigDataFromStorageProvider(storageProvider storage.StorageProvider, c
 	}
 
 	if configPath != "" {
-		runningServerConfig.StorageProvider.SetConfigPath(configPath)
+		parsedPath, err := url.Parse(configPath)
+		if err != nil {
+			return fmt.Errorf("could not parse config path: %s", err)
+		}
+
+		runningServerConfig.StorageProvider.SetConfigPath(parsedPath.Path)
 	}
 
 	configuredPaths, err := runningServerConfig.StorageProvider.Paths()
@@ -167,6 +173,8 @@ func getServerConfig(cmd *cobra.Command) error {
 	}
 
 	runningServerConfig.StorageProvider = storageProvider
+	runningServerConfig.StorageProviderName = storageProvider.Name()
+	runningServerConfig.StorageProviderDetails = storageProvider.Options()
 
 	err = getConfigDataFromStorageProvider(storageProvider, configPath)
 	if err != nil {

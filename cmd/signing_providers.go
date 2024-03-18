@@ -32,9 +32,16 @@ func setupLocalKeyProvider() error {
 		return err
 	}
 
+	publicKey, err := provider.PublicKey()
+	if err != nil {
+		return err
+	}
+
 	runningServerConfig.SigningKeyProvider = provider
 	runningServerConfig.SigningKeyProviderName = consts.SigningKeyProviderLocal
 	runningServerConfig.SigningKeyProviderDetails = nil
+	runningServerConfig.PublicKey = publicKey
+
 	return nil
 }
 
@@ -107,9 +114,16 @@ func setupAWSKeyProvider() error {
 	if err != nil {
 		return err
 	}
+	publicKey, err := provider.PublicKey()
+	if err != nil {
+		return err
+	}
+
 	runningServerConfig.SigningKeyProvider = &provider
 	runningServerConfig.SigningKeyProviderName = consts.SigningKeyProviderAWS
 	runningServerConfig.SigningKeyProviderDetails = awsKeyInfo
+	runningServerConfig.PublicKey = publicKey
+
 	fmt.Printf(Info + "Successfully retrieved signing key from AWS")
 	return nil
 }
@@ -274,9 +288,17 @@ func setupVaultKeyProvider() error {
 	if err != nil {
 		return err
 	}
+
+	publicKey, err := provider.PublicKey()
+	if err != nil {
+		return err
+	}
+
 	runningServerConfig.SigningKeyProvider = &provider
 	runningServerConfig.SigningKeyProviderName = consts.SigningKeyProviderVault
 	runningServerConfig.SigningKeyProviderDetails = vaultKeyInfo
+	runningServerConfig.PublicKey = publicKey
+
 	fmt.Printf(Info + "Successfully retrieved signing key from Vault")
 	return nil
 }
@@ -320,9 +342,17 @@ func setupExternalKeyProvider() error {
 		return err
 	}
 
+	publicKey, err := provider.PublicKey()
+	if err != nil {
+		// External signing providers do not return errors for public keys, but
+		// in case the function ever changes, we will be prepared
+		return err
+	}
+
 	runningServerConfig.SigningKeyProvider = &provider
 	runningServerConfig.SigningKeyProviderDetails = externalKeyInfo
 	runningServerConfig.SigningKeyProviderName = consts.SigningKeyProviderExternal
+	runningServerConfig.PublicKey = publicKey
 
 	return nil
 }

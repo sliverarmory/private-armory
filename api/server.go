@@ -31,6 +31,7 @@ import (
 	"net/url"
 	"os"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -38,6 +39,7 @@ import (
 	"github.com/sliverarmory/external-armory/api/signing"
 	"github.com/sliverarmory/external-armory/api/storage"
 	"github.com/sliverarmory/external-armory/consts"
+	"github.com/sliverarmory/external-armory/util"
 )
 
 var StatusOKResponse = []byte(`{"status": "ok"}`)
@@ -73,6 +75,9 @@ type ArmoryServerConfig struct {
 	SigningKeyProviderName    string                 `json:"signing_key_provider"`
 	SigningKeyProviderDetails signing.SigningKeyInfo `json:"signing_key_provider_details,omitempty"`
 
+	StorageProviderName    string                 `json:"storage_provider"`
+	StorageProviderDetails storage.StorageOptions `json:"storage_provider_details,omitempty"`
+
 	SigningKeyProvider signing.SigningProvider `json:"-"`
 	StorageProvider    storage.StorageProvider `json:"-"`
 }
@@ -82,6 +87,7 @@ func (asc *ArmoryServerConfig) UnmarshalJSON(data []byte) error {
 	// Unmarshal the signing key provider name
 	signingKeyTemp := new(struct {
 		ProviderType string `json:"signing_key_provider"`
+		StorageType  string `json:"storage_provider"`
 	})
 
 	if err := json.Unmarshal(data, signingKeyTemp); err != nil {
@@ -100,6 +106,16 @@ func (asc *ArmoryServerConfig) UnmarshalJSON(data []byte) error {
 	default:
 		return fmt.Errorf("unsupported signing key provider %q", signingKeyTemp.ProviderType)
 	}
+
+	switch signingKeyTemp.StorageType {
+	case consts.AWSS3StorageProviderStr:
+		asc.StorageProviderDetails = new(storage.S3StorageOptions)
+	case consts.LocalStorageProviderStr:
+		asc.StorageProviderDetails = new(storage.LocalStorageOptions)
+	default:
+		return fmt.Errorf("unsupported storage provider %q", signingKeyTemp.StorageType)
+	}
+
 	// Call unmarshal again
 	// Define a temporary type to avoid recursion
 	type ascAlias ArmoryServerConfig
@@ -402,6 +418,25 @@ func derivePackageNameFromRequest(req *http.Request) (string, error) {
 	return requestedPackageName, nil
 }
 
+func getManifestFromPackageData(packageData []byte) []byte {
+	var manifestData []byte
+	var err error
+
+	manifestData, err = util.ReadFileFromTarGzMemory(packageData, consts.AliasArchiveManifestFilePath)
+	if err != nil {
+		return nil
+	}
+	if manifestData == nil {
+		// Then this may be an extension
+		manifestData, err = util.ReadFileFromTarGzMemory(packageData, consts.ExtensionArchiveManifestFilePath)
+		if err != nil {
+			return nil
+		}
+	}
+
+	return manifestData
+}
+
 func (s *ArmoryServer) AddPackageHandler(resp http.ResponseWriter, req *http.Request) {
 	resp.Header().Set("Content-Type", "application/json; charset=utf-8")
 
@@ -412,12 +447,13 @@ func (s *ArmoryServer) AddPackageHandler(resp http.ResponseWriter, req *http.Req
 		s.jsonError(resp, err)
 		return
 	}
+	requestedPackageName = strings.TrimPrefix(requestedPackageName, "/")
 	_, err = s.ArmoryServerConfig.StorageProvider.CheckPackage(requestedPackageName)
 	if err == nil {
 		// The package exists
 		s.jsonError(resp, fmt.Errorf("%s already exists", requestedPackageName))
 		return
-	} else if !errors.Is(err, os.ErrNotExist) {
+	} else if !errors.Is(err, storage.ErrDoesNotExist) {
 		// If we have any other error than the file not existing, bail
 		s.jsonError(resp, fmt.Errorf("internal error for package %s: %s", requestedPackageName, err))
 		return
@@ -429,8 +465,34 @@ func (s *ArmoryServer) AddPackageHandler(resp http.ResponseWriter, req *http.Req
 		s.jsonError(resp, fmt.Errorf("error reading package %s from request", requestedPackageName))
 		return
 	}
+	manifestData := getManifestFromPackageData(packageData)
+	if manifestData == nil {
+		s.jsonError(resp, fmt.Errorf("could not extract manifest from provided package %s", requestedPackageName))
+		return
+	}
+
 	err = s.ArmoryServerConfig.StorageProvider.WritePackage(requestedPackageName, packageData)
-	// TODO: Refresh package index
+	if refreshEnabled, _ := s.ArmoryServerConfig.StorageProvider.AutoRefreshEnabled(); !refreshEnabled {
+		// The last error when setting up refreshing does not matter here - if refreshing is disabled, we have to
+		// sign the package
+		signature, err := s.ArmoryServerConfig.SigningKeyProvider.SignPackage(packageData, manifestData)
+		if err != nil {
+			s.jsonError(resp, fmt.Errorf("error signing package %s: %s", requestedPackageName, err))
+			return
+		}
+		err = s.ArmoryServerConfig.StorageProvider.WritePackageSignature(requestedPackageName, signature)
+		if err != nil {
+			s.jsonError(resp, fmt.Errorf("could not write signature for %s: %s", requestedPackageName, err))
+			err = s.ArmoryServerConfig.StorageProvider.RemovePackage(requestedPackageName)
+			if err != nil {
+				s.jsonError(resp, fmt.Errorf("could not delete package %s from storage provider: %s", requestedPackageName, err))
+			} else {
+				s.jsonError(resp, fmt.Errorf("deleted package %s from storage provider", requestedPackageName))
+			}
+			return
+		}
+	}
+
 	if err != nil {
 		s.jsonError(resp, err)
 		return
@@ -451,6 +513,7 @@ func (s *ArmoryServer) ModifyPackageHandler(resp http.ResponseWriter, req *http.
 		return
 	}
 
+	requestedPackageName = strings.TrimPrefix(requestedPackageName, "/")
 	if _, err := s.ArmoryServerConfig.StorageProvider.CheckPackage(requestedPackageName); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			s.jsonError(resp, fmt.Errorf("internal error for package %s: %s", requestedPackageName, err))
@@ -464,6 +527,7 @@ func (s *ArmoryServer) ModifyPackageHandler(resp http.ResponseWriter, req *http.
 		s.jsonError(resp, fmt.Errorf("error reading package %s from request", requestedPackageName))
 		return
 	}
+
 	err = s.ArmoryServerConfig.StorageProvider.WritePackage(requestedPackageName, packageData)
 	if err != nil {
 		s.jsonError(resp, err)
@@ -481,6 +545,8 @@ func (s *ArmoryServer) RemovePackageHandler(resp http.ResponseWriter, req *http.
 		s.jsonError(resp, err)
 		return
 	}
+
+	requestedPackageName = strings.TrimPrefix(requestedPackageName, "/")
 
 	_, err = s.ArmoryServerConfig.StorageProvider.CheckPackage(requestedPackageName)
 

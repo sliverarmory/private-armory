@@ -493,6 +493,24 @@ func getDefaultLocalRootDir() (string, error) {
 	return filepath.Join(cwd, consts.ArmoryRootDirName), nil
 }
 
+func getS3BucketRegion(bucketName string) (string, error) {
+	// Try to get the region from the environment
+	s3Region, s3RegionSet := os.LookupEnv(consts.AWSS3RegionEnvVar)
+	if !s3RegionSet {
+		err := survey.AskOne(&survey.Input{
+			Message: fmt.Sprintf("Region for bucket %s:", bucketName),
+			Default: "us-east-1",
+		},
+			&s3Region,
+			survey.WithValidator(survey.Required),
+		)
+		if err != nil {
+			return "", errors.New("canceled by user")
+		}
+	}
+	return s3Region, nil
+}
+
 func initializeStorageProviderFromPath(path string) (storage.StorageProvider, error) {
 	var storageProvider storage.StorageProvider
 	var tempServerConfig api.ArmoryServerConfig
@@ -504,8 +522,36 @@ func initializeStorageProviderFromPath(path string) (storage.StorageProvider, er
 
 	switch parsedPath.Scheme {
 	case consts.AWSS3StorageProviderStr:
-		// Not implemented yet
-		fallthrough
+		// The "host" is the bucket name
+		bucketDir := strings.TrimPrefix(filepath.Dir(parsedPath.Path), "/")
+		bucketConfigFilePath := strings.TrimPrefix(parsedPath.Path, "/")
+		// Try to get the region
+		region, err := getS3BucketRegion(parsedPath.Host)
+		if err != nil {
+			return nil, err
+		}
+		storageProvider = &storage.S3StorageProvider{}
+		err = storageProvider.New(storage.S3StorageOptions{
+			BucketName: parsedPath.Host,
+			Directory:  bucketDir,
+			Region:     region,
+		}, true)
+		if err != nil {
+			return nil, err
+		}
+		// Try to get the config from the bucket
+		err = storageProvider.SetConfigPath(bucketConfigFilePath)
+		if err != nil {
+			return nil, err
+		}
+		configData, err := storageProvider.ReadConfig()
+		if err != nil {
+			return nil, fmt.Errorf("error reading config file %q: %s", path, err)
+		}
+		err = json.Unmarshal(configData, &tempServerConfig)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing config file %q: %s", path, err)
+		}
 	case "", "file":
 		var localPath string
 		// Then the path provided is on the local file system - we need to determine if it is a config file or a directory
@@ -531,7 +577,7 @@ func initializeStorageProviderFromPath(path string) (storage.StorageProvider, er
 			localPath = path
 		}
 		storageProvider = &storage.LocalStorageProvider{}
-		err = storageProvider.New(localPath, true)
+		err = storageProvider.New(storage.LocalStorageOptions{BasePath: localPath}, true)
 		if err != nil {
 			return nil, err
 		}
@@ -565,9 +611,15 @@ func getStorageProvider(cmd *cobra.Command) (storage.StorageProvider, string, er
 	}
 
 	if rootDir == "" {
-		rootDir, err = getDefaultLocalRootDir()
-		if err != nil {
-			return nil, "", err
+		// Try to get the root dir from the environment
+		rootDirEnv, rootDirEnvSet := os.LookupEnv(consts.RootDirEnvVar)
+		if rootDirEnvSet {
+			rootDir = rootDirEnv
+		} else {
+			rootDir, err = getDefaultLocalRootDir()
+			if err != nil {
+				return nil, "", err
+			}
 		}
 	}
 
@@ -578,11 +630,28 @@ func getStorageProvider(cmd *cobra.Command) (storage.StorageProvider, string, er
 	}
 	switch parsedDirPath.Scheme {
 	case consts.AWSS3StorageProviderStr:
-		// Not implemented yet
-		fallthrough
+		bucketDir := strings.TrimPrefix(parsedDirPath.Path, "/")
+		storageProvider = &storage.S3StorageProvider{}
+		// Try to get the region from the environment
+		s3Region, err := getS3BucketRegion(parsedDirPath.Host)
+		if err != nil {
+			return nil, "", err
+		}
+
+		// The "host" is the bucket name
+		storageOptions := storage.S3StorageOptions{
+			BucketName: parsedDirPath.Host,
+			Directory:  bucketDir,
+			Region:     s3Region,
+		}
+		err = storageProvider.New(storageOptions, true)
+		if err != nil {
+			return nil, "", err
+		}
 	case "", "file":
 		storageProvider = &storage.LocalStorageProvider{}
-		err = storageProvider.New(parsedDirPath.Path, true)
+		storageOptions := storage.LocalStorageOptions{BasePath: parsedDirPath.Path}
+		err = storageProvider.New(storageOptions, true)
 		if err != nil {
 			return nil, "", err
 		}

@@ -29,16 +29,20 @@ const (
 	BundlesFileName                  = "bundles.json"
 	ConfigFileName                   = "config.json"
 	CertificatesDirName              = "certificates"
-	TLSKeyPathFromRoot               = CertificatesDirName + string(os.PathSeparator) + "armory.key"
-	TLSCertPathFromRoot              = CertificatesDirName + string(os.PathSeparator) + "armory.crt"
+	TLSKeyFileName                   = "armory.key"
+	TLSCertFileName                  = "armory.crt"
+	VaultCAFileName                  = "armory-vault-ca.pem"
+	TLSKeyPathFromRoot               = CertificatesDirName + string(os.PathSeparator) + TLSKeyFileName
+	TLSCertPathFromRoot              = CertificatesDirName + string(os.PathSeparator) + TLSCertFileName
 	DefaultListenPort                = 8888
 	DefaultAWSRegion                 = "us-west-2"
 	LocalSigningKeyName              = "private.key"
-	VaultCAPathFromRoot              = CertificatesDirName + string(os.PathSeparator) + "armory-vault-ca.pem"
+	VaultCAPathFromRoot              = CertificatesDirName + string(os.PathSeparator) + VaultCAFileName
 	AliasManifestFileName            = "alias.json"
 	AliasArchiveManifestFilePath     = "./" + AliasManifestFileName
 	ExtensionManifestFileName        = "extension.json"
 	ExtensionArchiveManifestFilePath = "./" + ExtensionManifestFileName
+	LogDirName                       = "logs"
 	AppLogName                       = "app"
 	AccessLogName                    = "access"
 
@@ -71,7 +75,6 @@ const (
 	// AWS
 	AWSSigningKeySecretNameFlagStr = "aws-key-name"
 	AWSRegionFlagStr               = "aws-region"
-	AWSS3StorageProviderStr        = "s3"
 
 	// Vault
 	VaultURLFlagStr         = "vault-url"
@@ -89,7 +92,7 @@ const (
 	TLSEnabledEnvVar          = "ARMORY_TLS_ENABLED"
 	SigningKeyProviderEnvVar  = "ARMORY_SIGNING_KEY_PROVIDER"
 	AWSKeySecretNameEnvVar    = "ARMORY_AWS_SIGNING_KEY"
-	AWSKeyRegionEnvVar        = "ARMORY_AWS_REGION"
+	AWSKeyRegionEnvVar        = "ARMORY_AWS_SK_REGION"
 	VaultAddrEnvVar           = "ARMORY_VAULT_ADDR"
 	VaultAppRolePathEnvVar    = "ARMORY_VAULT_APP_ROLE_PATH"
 	VaultRoleIDEnvVar         = "ARMORY_VAULT_APP_ROLE_ID"
@@ -97,6 +100,8 @@ const (
 	VaultSigningKeyPathEnvVar = "ARMORY_VAULT_SIGNING_KEY_PATH"
 	ExternalPublicKeyEnvVar   = "ARMORY_EXTERNAL_PUBLIC_KEY"
 	SigningKeyEnvVar          = "ARMORY_SIGNING_KEY"
+	RootDirEnvVar             = "ARMORY_ROOT_DIR"
+	AWSS3RegionEnvVar         = "ARMORY_S3_REGION"
 
 	// Signing Key Providers
 	SigningKeyProviderAWS      = "aws"
@@ -113,6 +118,10 @@ const (
 	VaultAppSecretIDKey     = "secretID"
 	VaultKeyPathKey         = "key-path"
 	VaultCustomCAEnabledKey = "use-custom-ca"
+
+	// Storage Providers
+	AWSS3StorageProviderStr = "s3"
+	LocalStorageProviderStr = "local"
 
 	// Should not be edited directly, so hide them
 	ArmoryIndexFileName    = ".armory-index.json"

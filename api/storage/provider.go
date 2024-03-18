@@ -27,7 +27,11 @@ to be supplied by the caller.
 */
 type StorageProvider interface {
 	// New sets up a new instance of the storage provider with a given base path
-	New(string, bool) error
+	New(StorageOptions, bool) error
+	// Returns the name of the storage provider
+	Name() string
+	// Returns the options that the storager provider is configured with
+	Options() StorageOptions
 	// Returns whether the directories had to be created on the storage provider (useful to know whether initial setup needs to be run)
 	IsNew() bool
 	// Returns the paths configured for this provider and an error if the provider is not initialized
@@ -36,13 +40,15 @@ type StorageProvider interface {
 	AutoRefreshEnabled() (bool, error)
 	// Returns the channels for file events and errors. An error is returned if the provider is not initialized or there was an error in setting up auto refresh
 	AutoRefreshChannels() (chan string, chan error, error)
+	// Perform any final cleanup that may need to be done before exiting
+	Close() error
 	// Removes the root directory and all of its subdirectories
 	Destroy() error
 	// Returns whether the storage provider has been initialized successfully
 	Initialized() bool
 	// Returns the root directory (base path) of the storage provider
 	BasePath() string
-	// Checks for the existance of a file in the storage provider
+	// Checks for the existance of a file in the storage provider - returns nil if the file exists, storage.ErrNotExist if it does not, and an error if the function encountered another error
 	CheckFile(string) error
 	// Sets a different path for the config file than the default
 	SetConfigPath(string) error
@@ -94,6 +100,8 @@ type StorageProvider interface {
 	WriteIndexSignature([]byte) error
 	// Return the named logging backend (io.Writer)
 	GetLogger(string) (io.Writer, error)
+	// Close the logging backend (returns multiple errors because there could be multiple backends)
+	CloseLogger() []error
 	// For Vault
 	// Return the custom CA PEM file for the configured Vault
 	ReadVaultCA() ([]byte, error)
@@ -125,6 +133,7 @@ type StoragePaths struct {
 	Extensions        string
 	PackageSignatures string
 	Certificates      string
+	Logs              string
 	Bundles           string
 	Config            string
 	Index             string
@@ -141,6 +150,7 @@ func (sp *StoragePaths) Directories() map[string]string {
 		"extensions":         sp.Extensions,
 		"package signatures": sp.PackageSignatures,
 		"certificates":       sp.Certificates,
+		"logs":               sp.Logs,
 	}
 }
 
@@ -156,3 +166,5 @@ func (sp *StoragePaths) Files() map[string]string {
 		"Vault CA PEM file":      sp.VaultCAPEM,
 	}
 }
+
+type StorageOptions interface{}

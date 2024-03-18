@@ -30,6 +30,12 @@ type LocalStorageProvider struct {
 	refreshEventChannel chan string
 	refreshErrorChannel chan error
 	refreshSetupErr     error
+	loggers             []*os.File
+	options             LocalStorageOptions
+}
+
+type LocalStorageOptions struct {
+	BasePath string
 }
 
 func checkAndCreateDirectory(name, path string, createAsNeeded bool) (bool, error) {
@@ -122,8 +128,13 @@ func (lsp *LocalStorageProvider) setUpPackageWatcher() {
 	}
 }
 
-func (lsp *LocalStorageProvider) New(basePath string, createAsNeeded bool) error {
+func (lsp *LocalStorageProvider) New(options StorageOptions, createAsNeeded bool) error {
 	// Make sure the base path exists
+	localOptions, ok := options.(LocalStorageOptions)
+	if !ok {
+		return errors.New("invalid options provided")
+	}
+	basePath := localOptions.BasePath
 	pathInfo, err := os.Stat(basePath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -150,6 +161,7 @@ func (lsp *LocalStorageProvider) New(basePath string, createAsNeeded bool) error
 		PackageSignatures: filepath.Join(basePath, consts.SignaturesDirName),
 		Certificates:      filepath.Join(basePath, consts.CertificatesDirName),
 		Bundles:           filepath.Join(basePath, consts.BundlesFileName),
+		Logs:              filepath.Join(basePath, consts.LogDirName),
 		Config:            filepath.Join(basePath, consts.ConfigFileName),
 		Index:             filepath.Join(basePath, consts.ArmoryIndexFileName),
 		IndexSignature:    filepath.Join(basePath, consts.ArmoryIndexSigFileName),
@@ -179,6 +191,8 @@ func (lsp *LocalStorageProvider) New(basePath string, createAsNeeded bool) error
 
 	// We should have all of the directories we need, so we should be good to go
 	lsp.basePath = basePath
+	lsp.loggers = []*os.File{}
+	lsp.options = localOptions
 	lsp.initialized = true
 
 	// Attempt to start package watcher / auto refresh
@@ -188,6 +202,14 @@ func (lsp *LocalStorageProvider) New(basePath string, createAsNeeded bool) error
 	lsp.setUpPackageWatcher()
 
 	return nil
+}
+
+func (lsp *LocalStorageProvider) Name() string {
+	return consts.LocalStorageProviderStr
+}
+
+func (lsp *LocalStorageProvider) Options() StorageOptions {
+	return lsp.options
 }
 
 func (lsp *LocalStorageProvider) IsNew() bool {
@@ -218,8 +240,20 @@ func (lsp *LocalStorageProvider) AutoRefreshChannels() (chan string, chan error,
 	return lsp.refreshEventChannel, lsp.refreshErrorChannel, nil
 }
 
+func (lsp *LocalStorageProvider) Close() error {
+	// Errors would only be generated when closing the log files in cases when the log file
+	// was previously closed. We do not need to worry about that kind of error when tearing
+	// down the provider.
+	lsp.CloseLogger()
+	return lsp.packageWatcher.Close()
+}
+
 func (lsp *LocalStorageProvider) Destroy() error {
 	lsp.packageWatcher.Close()
+	// Errors would only be generated when closing the log files in cases when the log file
+	// was previously closed. We do not need to worry about that kind of error when tearing
+	// down the provider.
+	lsp.CloseLogger()
 	return os.RemoveAll(lsp.basePath)
 }
 
@@ -227,6 +261,7 @@ func (lsp *LocalStorageProvider) readFile(path string) ([]byte, error) {
 	if !lsp.initialized {
 		return nil, ErrStorageNotInitialized
 	}
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -269,6 +304,10 @@ func (lsp *LocalStorageProvider) SetConfigPath(newConfigPath string) error {
 }
 
 func (lsp *LocalStorageProvider) ReadConfig() ([]byte, error) {
+	if !lsp.initialized {
+		return nil, ErrStorageNotInitialized
+	}
+
 	return lsp.readFile(lsp.paths.Config)
 }
 
@@ -281,6 +320,10 @@ func (lsp *LocalStorageProvider) WriteConfig(configData []byte) error {
 }
 
 func (lsp *LocalStorageProvider) ReadPackageSigningKey() ([]byte, error) {
+	if !lsp.initialized {
+		return nil, ErrStorageNotInitialized
+	}
+
 	return lsp.readFile(lsp.paths.PackageSigningKey)
 }
 
@@ -293,6 +336,10 @@ func (lsp *LocalStorageProvider) WritePackageSigningKey(data []byte) error {
 }
 
 func (lsp *LocalStorageProvider) ReadTLSCertificateKey() ([]byte, error) {
+	if !lsp.initialized {
+		return nil, ErrStorageNotInitialized
+	}
+
 	return lsp.readFile(lsp.paths.CertificateKey)
 }
 
@@ -305,6 +352,10 @@ func (lsp *LocalStorageProvider) WriteTLSCertificateKey(data []byte) error {
 }
 
 func (lsp *LocalStorageProvider) ReadTLSCertificateCrt() ([]byte, error) {
+	if !lsp.initialized {
+		return nil, ErrStorageNotInitialized
+	}
+
 	return lsp.readFile(lsp.paths.CertificateCrt)
 }
 
@@ -317,6 +368,10 @@ func (lsp *LocalStorageProvider) WriteTLSCertificateCrt(data []byte) error {
 }
 
 func (lsp *LocalStorageProvider) ReadBundleFile() ([]byte, error) {
+	if !lsp.initialized {
+		return nil, ErrStorageNotInitialized
+	}
+
 	return lsp.readFile(lsp.paths.Bundles)
 }
 
@@ -324,6 +379,7 @@ func (lsp *LocalStorageProvider) WriteBundleFile(data []byte) error {
 	if !lsp.initialized {
 		return ErrStorageNotInitialized
 	}
+
 	return os.WriteFile(lsp.paths.Bundles, data, defaultFilePermissions)
 }
 
@@ -396,6 +452,7 @@ func (lsp *LocalStorageProvider) WritePackage(packageName string, packageData []
 	if !lsp.initialized {
 		return ErrStorageNotInitialized
 	}
+
 	var packagePath string
 
 	packageType := derivePackageTypeFromArchive(packageData)
@@ -459,6 +516,10 @@ func (lsp *LocalStorageProvider) RemovePackage(packageName string) error {
 }
 
 func (lsp *LocalStorageProvider) ListPackages(packageType consts.PackageType) (map[string]PackageEntry, []error) {
+	if !lsp.initialized {
+		return nil, []error{ErrStorageNotInitialized}
+	}
+
 	manifests := map[string]PackageEntry{}
 	allErrors := []error{}
 	entryDir := ""
@@ -554,6 +615,9 @@ func (lsp *LocalStorageProvider) ListPackages(packageType consts.PackageType) (m
 }
 
 func (lsp *LocalStorageProvider) ReadPackageSignature(packageName string) ([]byte, error) {
+	if !lsp.initialized {
+		return nil, ErrStorageNotInitialized
+	}
 	sigPath := filepath.Join(lsp.paths.PackageSignatures, packageName)
 	return lsp.readFile(sigPath)
 }
@@ -576,6 +640,10 @@ func (lsp *LocalStorageProvider) RemovePackageSignature(packageName string) erro
 }
 
 func (lsp *LocalStorageProvider) ReadIndex() ([]byte, error) {
+	if !lsp.initialized {
+		return nil, ErrStorageNotInitialized
+	}
+
 	return lsp.readFile(lsp.paths.Index)
 }
 
@@ -588,6 +656,10 @@ func (lsp *LocalStorageProvider) WriteIndex(indexData []byte) error {
 }
 
 func (lsp *LocalStorageProvider) ReadIndexSignature() ([]byte, error) {
+	if !lsp.initialized {
+		return nil, ErrStorageNotInitialized
+	}
+
 	return lsp.readFile(lsp.paths.IndexSignature)
 }
 
@@ -595,20 +667,45 @@ func (lsp *LocalStorageProvider) WriteIndexSignature(indexSignatureData []byte) 
 	if !lsp.initialized {
 		return ErrStorageNotInitialized
 	}
+
 	return os.WriteFile(lsp.paths.IndexSignature, indexSignatureData, defaultFilePermissions)
 }
 
 func (lsp *LocalStorageProvider) GetLogger(logName string) (io.Writer, error) {
-	logPath := filepath.Join(lsp.basePath, fmt.Sprintf("%s.log", logName))
+	if !lsp.initialized {
+		return nil, ErrStorageNotInitialized
+	}
+
+	// Standardize the log name
+	logName = strings.TrimSuffix(logName, ".log")
+
+	logPath := filepath.Join(lsp.paths.Logs, fmt.Sprintf("%s.log", logName))
 
 	logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, defaultFilePermissions)
 	if err != nil {
 		return nil, err
 	}
+
+	lsp.loggers = append(lsp.loggers, logFile)
+
 	return logFile, err
 }
 
+func (lsp *LocalStorageProvider) CloseLogger() []error {
+	if !lsp.initialized {
+		return []error{ErrStorageNotInitialized}
+	}
+
+	allErrors := []error{}
+
+	return allErrors
+}
+
 func (lsp *LocalStorageProvider) ReadVaultCA() ([]byte, error) {
+	if !lsp.initialized {
+		return nil, ErrStorageNotInitialized
+	}
+
 	return lsp.readFile(lsp.paths.VaultCAPEM)
 }
 
