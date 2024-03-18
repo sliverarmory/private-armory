@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -72,6 +73,14 @@ const (
 	Success = Bold + Green + "[+] " + Normal
 )
 
+func supportedStorageProviders() string {
+	return strings.Join([]string{
+		consts.LocalStorageProviderStr,
+		consts.AWSS3StorageProviderStr,
+	},
+		", ")
+}
+
 func init() {
 	rootCmd.Flags().StringP(consts.ConfigFlagStr, "c", "", "Config file path")
 	rootCmd.MarkFlagFilename(consts.ConfigFileName, "json")
@@ -83,6 +92,10 @@ func init() {
 	rootCmd.Flags().StringP(consts.ReadTimeoutFlagStr, "R", "1m", "HTTP read timeout expressed as a duration")
 	rootCmd.Flags().StringP(consts.WriteTimeoutFlagStr, "W", "1m", "HTTP write timeout expressed as a duration")
 	rootCmd.Flags().BoolP(consts.RefreshFlagStr, "r", false, "Force refresh of armory index (may require password input)")
+
+	rootCmd.Flags().StringP(consts.StorageProviderNameFlagStr, "s", consts.LocalStorageProviderStr, fmt.Sprintf("Storage provider name (supported providers: %s)", supportedStorageProviders()))
+	rootCmd.Flags().StringToStringP(consts.StorageProviderOptionsFlagStr, "o", nil, "Options for the storage provider specified as KEY1=VALUE1,KEY2=VALUE2...")
+
 	rootCmd.Flags().StringP(consts.AWSSigningKeySecretNameFlagStr, "a", "", "Name for the signing key if using AWS Secrets Manager")
 	rootCmd.Flags().StringP(consts.AWSRegionFlagStr, "g", "us-west-2", "AWS region if using Secrets Manager")
 	rootCmd.Flags().StringP(consts.VaultURLFlagStr, "U", "", "Vault location as a URL")

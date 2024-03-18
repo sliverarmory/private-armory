@@ -47,21 +47,25 @@ const (
 	AccessLogName                    = "access"
 
 	// Command line flags
-	LhostFlagStr        = "lhost"
-	LportFlagStr        = "lport"
-	ConfigFlagStr       = "config"
-	WriteTimeoutFlagStr = "write-timeout"
-	ReadTimeoutFlagStr  = "read-timeout"
-	DisableAuthFlagStr  = "disable-authentication"
-	RefreshFlagStr      = "refresh"
-	DomainFlagStr       = "domain"
-	EnableTLSFlagStr    = "enable-tls"
-	PublicKeyFlagStr    = "public-key"
-	FileFlagStr         = "file"
-	PasswordFlagStr     = "password"
-	PasswordFileFlagStr = "password-file"
-	KeyFlagStr          = "key"
-	UpdateConfigFlagStr = "update"
+	LhostFlagStr                  = "lhost"
+	LportFlagStr                  = "lport"
+	ConfigFlagStr                 = "config"
+	WriteTimeoutFlagStr           = "write-timeout"
+	ReadTimeoutFlagStr            = "read-timeout"
+	DisableAuthFlagStr            = "disable-authentication"
+	RefreshFlagStr                = "refresh"
+	DomainFlagStr                 = "domain"
+	EnableTLSFlagStr              = "enable-tls"
+	PublicKeyFlagStr              = "public-key"
+	FileFlagStr                   = "file"
+	PasswordFlagStr               = "password"
+	PasswordFileFlagStr           = "password-file"
+	KeyFlagStr                    = "key"
+	UpdateConfigFlagStr           = "update"
+	StorageProviderNameFlagStr    = "storage-provider"
+	SigningProviderNameFlagStr    = "signing-provider"
+	StorageProviderOptionsFlagStr = "storage-provider-options"
+	SigningProviderOptionsFlagStr = "signing-provider-options"
 
 	RootDirFlagStr = "root-dir"
 
@@ -122,6 +126,12 @@ const (
 	// Storage Providers
 	AWSS3StorageProviderStr = "s3"
 	LocalStorageProviderStr = "local"
+
+	// Storage Provider Options
+	AWSS3RegionOptionStr          = "region"
+	AWSS3BucketOptionStr          = "bucket"
+	AWSS3BucketDirectoryOptionStr = "directory"
+	LocalStoragePathOptionStr     = "path"
 
 	// Should not be edited directly, so hide them
 	ArmoryIndexFileName    = ".armory-index.json"

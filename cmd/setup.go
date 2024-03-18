@@ -588,6 +588,36 @@ func initializeStorageProviderFromPath(path string) (storage.StorageProvider, er
 	return storageProvider, nil
 }
 
+func parseStorageProviderOptions(providerName string, providerOptions map[string]string) (string, storage.StorageOptions, error) {
+	var rootDir string
+
+	switch providerName {
+	case consts.AWSS3StorageProviderStr:
+		options := storage.S3StorageOptions{}
+		options.Region = providerOptions[consts.AWSS3RegionOptionStr]
+		options.BucketName = providerOptions[consts.AWSS3BucketOptionStr]
+		options.Directory = providerOptions[consts.AWSS3BucketDirectoryOptionStr]
+		if options.BucketName != "" {
+			if options.Directory != "" {
+				rootDir = fmt.Sprintf("s3://%s/%s/", options.BucketName, options.Directory)
+			} else {
+				rootDir = fmt.Sprintf("s3://%s", options.BucketName)
+			}
+		}
+		return rootDir, options, nil
+	case consts.LocalStorageProviderStr:
+		options := storage.LocalStorageOptions{}
+		options.BasePath = providerOptions[consts.LocalStoragePathOptionStr]
+		rootDir = options.BasePath
+		return rootDir, options, nil
+	case "":
+		// If the
+		return rootDir, nil, nil
+	default:
+		return rootDir, nil, fmt.Errorf("unsupported storage provider %q", providerName)
+	}
+}
+
 func getStorageProvider(cmd *cobra.Command) (storage.StorageProvider, string, error) {
 	var storageProvider storage.StorageProvider
 
@@ -596,29 +626,47 @@ func getStorageProvider(cmd *cobra.Command) (storage.StorageProvider, string, er
 	if err != nil {
 		return nil, "", fmt.Errorf("error parsing flag --%s, %s", consts.ConfigFlagStr, err)
 	}
+
 	if configPath != "" {
 		// Attempt to bootstrap the storage provider from the config file
 		storageProvider, err = initializeStorageProviderFromPath(configPath)
 		return storageProvider, configPath, err
 	}
 
-	rootDir, err := cmd.Flags().GetString(consts.RootDirFlagStr)
+	storageProviderName, err := cmd.Flags().GetString(consts.StorageProviderNameFlagStr)
 	if err != nil {
-		// This usually happens if the cmd does not have a root-dir flag, so unless a config has been specified, assume the default root dir
-		// The only command that calls this function and does not have a root-dir flag is refresh, and if the user wants to refresh an index
-		// that does not live in the default root dir, they should be passing a config file
-		rootDir = ""
+		return nil, "", fmt.Errorf("error parsing flag --%s, %s", consts.StorageProviderNameFlagStr, err)
+	}
+	storageProviderName = strings.ToLower(storageProviderName)
+
+	storageProviderOptions, err := cmd.Flags().GetStringToString(consts.StorageProviderOptionsFlagStr)
+	if err != nil {
+		return nil, "", fmt.Errorf("error parsing flag --%s, %s", consts.StorageProviderOptionsFlagStr, err)
+	}
+
+	// We may be able to derive the root dir from the provided storage options, so check that first
+	rootDir, storageOptions, err := parseStorageProviderOptions(storageProviderName, storageProviderOptions)
+	if err != nil {
+		return nil, "", err
 	}
 
 	if rootDir == "" {
-		// Try to get the root dir from the environment
-		rootDirEnv, rootDirEnvSet := os.LookupEnv(consts.RootDirEnvVar)
-		if rootDirEnvSet {
-			rootDir = rootDirEnv
-		} else {
-			rootDir, err = getDefaultLocalRootDir()
-			if err != nil {
-				return nil, "", err
+		rootDir, _ = cmd.Flags().GetString(consts.RootDirFlagStr)
+		// We can skip the err because an error should only happen if the cmd does not have a root-dir flag,
+		// so unless a config has been specified, assume the default root dir
+		// The only command that calls this function and does not have a root-dir flag is refresh, and if the user wants to refresh an index
+		// that does not live in the default root dir, they should be passing a config file
+		// If there was an error, rootDir will still be empty
+		if rootDir == "" {
+			// Try to get the root dir from the environment
+			rootDirEnv, rootDirEnvSet := os.LookupEnv(consts.RootDirEnvVar)
+			if rootDirEnvSet {
+				rootDir = rootDirEnv
+			} else {
+				rootDir, err = getDefaultLocalRootDir()
+				if err != nil {
+					return nil, "", err
+				}
 			}
 		}
 	}
@@ -632,10 +680,18 @@ func getStorageProvider(cmd *cobra.Command) (storage.StorageProvider, string, er
 	case consts.AWSS3StorageProviderStr:
 		bucketDir := strings.TrimPrefix(parsedDirPath.Path, "/")
 		storageProvider = &storage.S3StorageProvider{}
-		// Try to get the region from the environment
-		s3Region, err := getS3BucketRegion(parsedDirPath.Host)
-		if err != nil {
-			return nil, "", err
+		var s3Region string
+		// See if we got a region from storage provider options
+		// We already got the root dir (bucket and directory) from the options or the root dir option
+		s3Options, ok := storageOptions.(storage.S3StorageOptions)
+		if !ok {
+			// Try to get the region from the environment
+			s3Region, err = getS3BucketRegion(parsedDirPath.Host)
+			if err != nil {
+				return nil, "", err
+			}
+		} else {
+			s3Region = s3Options.Region
 		}
 
 		// The "host" is the bucket name
