@@ -34,9 +34,9 @@ type S3StorageProvider struct {
 }
 
 type S3StorageOptions struct {
-	Region     string
-	BucketName string
-	Directory  string
+	Region     string `json:"region"`
+	BucketName string `json:"bucket"`
+	Directory  string `json:"directory"`
 }
 
 func decodeError(err error) error {

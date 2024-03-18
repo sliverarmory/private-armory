@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"time"
 
 	"github.com/sliverarmory/external-armory/api"
@@ -42,66 +43,72 @@ type ArmoryClientConfig struct {
 	AuthorizationCmd string `json:"authorization_cmd,omitempty"`
 }
 
+// Parses signing provider information received on the command line
+// If required information is not provided, the function does not return an error because the necessary information
+// may be provided later on through environment variables or asking the user
+// Returns an error if an unsupported provider is requested
+func parseSigningProviderOptions(signingProviderName string, signingProviderOptions map[string]string) (signing.SigningKeyInfo, error) {
+	var err error
+
+	switch signingProviderName {
+	case consts.SigningKeyProviderAWS:
+		awsConfigDetails := signing.AWSSigningKeyInfo{}
+		awsConfigDetails.Path = signingProviderOptions[consts.AWSSecretNameKey]
+		awsConfigDetails.Region = signingProviderOptions[consts.AWSRegionKey]
+		return &awsConfigDetails, nil
+	case consts.SigningKeyProviderExternal:
+		externalConfigDetails := signing.ExternalSigningKeyInfo{}
+		externalConfigDetails.PublicKey = signingProviderOptions[consts.ExternalPublicKeyKey]
+		return &externalConfigDetails, nil
+	case consts.SigningKeyProviderLocal:
+		localConfigDetails := signing.LocalSigningKeyInfo{}
+		localConfigDetails.Password = signingProviderOptions[consts.LocalKeyPasswordKey]
+		return &localConfigDetails, nil
+	case consts.SigningKeyProviderVault:
+		vaultConfigDetails := signing.VaultSigningKeyInfo{}
+		vaultConfigDetails.Address = signingProviderOptions[consts.VaultAddrKey]
+		vaultConfigDetails.AppRoleID = signingProviderOptions[consts.VaultAppRoleIDKey]
+		vaultConfigDetails.AppRolePath = signingProviderOptions[consts.VaultAppRolePathKey]
+		vaultConfigDetails.AppSecretID = signingProviderOptions[consts.VaultAppSecretIDKey]
+		vaultConfigDetails.VaultKeyPath = signingProviderOptions[consts.VaultKeyPathKey]
+		caFileLocation, ok := signingProviderOptions[consts.VaultCustomCAPathKey]
+		if ok {
+			// Try to read the CA file from the local filesystem
+			vaultConfigDetails.CustomCACert, err = os.ReadFile(caFileLocation)
+			if err != nil {
+				return nil, fmt.Errorf("could not read Vault CA PEM file from %q: %s", caFileLocation, err)
+			}
+		}
+		return &vaultConfigDetails, nil
+	default:
+		return nil, fmt.Errorf("signing provider %q is not supported", signingProviderName)
+	}
+}
+
 func checkForCmdSigningProvider(cmd *cobra.Command) error {
 	var err error
 
-	// The signing key provider will be filled in once the details are verified (and a key is retrieved)
-	if cmd.Flags().Changed(consts.AWSSigningKeySecretNameFlagStr) {
-		awsConfigDetails := signing.AWSSigningKeyInfo{}
-
-		awsConfigDetails.Path, err = cmd.Flags().GetString(consts.AWSSigningKeySecretNameFlagStr)
-		if err != nil {
-			return fmt.Errorf("error parsing flag --%s, %s", consts.AWSSigningKeySecretNameFlagStr, err)
-		}
-		awsConfigDetails.Region, err = cmd.Flags().GetString(consts.AWSRegionFlagStr)
-		if err != nil {
-			return fmt.Errorf("error parsing flag --%s, %s", consts.AWSRegionFlagStr, err)
-		}
-
-		runningServerConfig.SigningKeyProviderDetails = &awsConfigDetails
-	} else if cmd.Flags().Changed(consts.VaultURLFlagStr) {
-		vaultConfigDetails := signing.VaultSigningKeyInfo{}
-
-		vaultURL, err := cmd.Flags().GetString(consts.VaultURLFlagStr)
-		if err != nil {
-			return fmt.Errorf("error parsing flag --%s, %s", consts.VaultURLFlagStr, err)
-		}
-		vaultConfigDetails.Address = vaultURL
-
-		vaultApprolePath, err := cmd.Flags().GetString(consts.VaultAppRolePathFlagStr)
-		if err != nil {
-			return fmt.Errorf("error parsing flag --%s, %s", consts.VaultAppRolePathFlagStr, err)
-		}
-		vaultConfigDetails.AppRolePath = vaultApprolePath
-
-		vaultRoleID, err := cmd.Flags().GetString(consts.VaultRoleIDFlagStr)
-		if err != nil {
-			return fmt.Errorf("error parsing flag --%s, %s", consts.VaultRoleIDFlagStr, err)
-		}
-		vaultConfigDetails.AppRoleID = vaultRoleID
-
-		vaultSecretID, err := cmd.Flags().GetString(consts.VaultSecretIDFlagStr)
-		if err != nil {
-			return fmt.Errorf("error parsing flag --%s, %s", consts.VaultSecretIDFlagStr, err)
-		}
-		vaultConfigDetails.AppSecretID = vaultSecretID
-
-		vaultPath, err := cmd.Flags().GetString(consts.VaultKeyPathFlagStr)
-		if err != nil {
-			return fmt.Errorf("error parsing flag --%s, %s", consts.VaultKeyPathFlagStr, err)
-		}
-		vaultConfigDetails.VaultKeyPath = vaultPath
-
-		runningServerConfig.SigningKeyProviderDetails = &vaultConfigDetails
-	} else if cmd.Flags().Changed(consts.PublicKeyFlagStr) {
-		externalSignerDetails := signing.ExternalSigningKeyInfo{}
-		publicKey, err := cmd.Flags().GetString(consts.PublicKeyFlagStr)
-		if err != nil {
-			return fmt.Errorf("error parsing flag --%s, %s", consts.PublicKeyFlagStr, err)
-		}
-		externalSignerDetails.PublicKey = publicKey
-		runningServerConfig.SigningKeyProviderDetails = &externalSignerDetails
+	if !cmd.Flags().Changed(consts.SigningProviderNameFlagStr) {
+		// If the signing provider name was not specified, then we will have to look at the config file and environment variables
+		return nil
 	}
+
+	signingProviderName, err := cmd.Flags().GetString(consts.SigningProviderNameFlagStr)
+	if err != nil {
+		return fmt.Errorf("error parsing flag --%s, %s", consts.SigningProviderNameFlagStr, err)
+	}
+
+	signingProviderOptions, err := cmd.Flags().GetStringToString(consts.SigningProviderOptionsFlagStr)
+	if err != nil {
+		return fmt.Errorf("error parsing flag --%s, %s", consts.SigningProviderOptionsFlagStr, err)
+	}
+
+	// The signing key provider will be filled in once the details are verified (and a key is retrieved)
+	runningServerConfig.SigningKeyProviderDetails, err = parseSigningProviderOptions(signingProviderName, signingProviderOptions)
+	if err != nil {
+		return err
+	}
+	runningServerConfig.SigningKeyProviderName = signingProviderName
 
 	return nil
 }

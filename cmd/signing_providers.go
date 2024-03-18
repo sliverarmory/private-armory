@@ -124,7 +124,7 @@ func setupAWSKeyProvider() error {
 	runningServerConfig.SigningKeyProviderDetails = awsKeyInfo
 	runningServerConfig.PublicKey = publicKey
 
-	fmt.Printf(Info + "Successfully retrieved signing key from AWS")
+	fmt.Println(Info + "Successfully retrieved signing key from AWS")
 	return nil
 }
 
@@ -198,28 +198,37 @@ func setupVaultKeyProvider() error {
 	vaultKeyInfo.TLSEnabled = vaultUsesTLS(vaultKeyInfo.Address)
 	// Check to see if we need to use a custom CA file
 	if vaultKeyInfo.TLSEnabled {
-		// If the PEM file for the CA has been supplied, then use that
-		vaultKeyInfo.CustomCACert, err = runningServerConfig.StorageProvider.ReadVaultCA()
-		if err != nil {
-			getCustomCA := userConfirm("Do you need to supply a custom CA PEM file?")
-			if getCustomCA {
-				caFilePath, err := getPathToFileFromUser("Path to custom CA PEM file (Ctrl-C to cancel):")
-				if err == nil {
-					// For future runs of the server, it is easier we keep the file at the default path
-					caData, err := os.ReadFile(caFilePath)
-					if err != nil {
-						return fmt.Errorf("could not read custom CA PEM file: %s", err)
+		// If the PEM file for the CA has been supplied from the command line, then use that
+		if vaultKeyInfo.CustomCACert != nil {
+			err = runningServerConfig.StorageProvider.WriteVaultCA(vaultKeyInfo.CustomCACert)
+			if err != nil {
+				return fmt.Errorf("could not write custom CA certificate to storage provider: %s", err)
+			}
+		} else {
+			// Check to see if the storage provider has CA data in it already
+			vaultKeyInfo.CustomCACert, err = runningServerConfig.StorageProvider.ReadVaultCA()
+			if err != nil {
+				getCustomCA := userConfirm("Do you need to supply a custom CA PEM file?")
+				if getCustomCA {
+					caFilePath, err := getPathToFileFromUser("Path to custom CA PEM file (Ctrl-C to cancel):")
+					if err == nil {
+						// For future runs of the server, it is easier we keep the file at the default path
+						caData, err := os.ReadFile(caFilePath)
+						if err != nil {
+							return fmt.Errorf("could not read custom CA PEM file: %s", err)
+						}
+						err = runningServerConfig.StorageProvider.WriteVaultCA(caData)
+						if err != nil {
+							return fmt.Errorf("could not write custom CA certificate to storage provider: %s", err)
+						}
+						vaultKeyInfo.CustomCACert = caData
+					} else {
+						return fmt.Errorf("cancelled by user")
 					}
-					err = runningServerConfig.StorageProvider.WriteVaultCA(caData)
-					if err != nil {
-						return fmt.Errorf("could not write custom CA certificate to storage provider: %s", err)
-					}
-					vaultKeyInfo.CustomCACert = caData
-				} else {
-					return fmt.Errorf("cancelled by user")
 				}
 			}
 		}
+
 	}
 
 	// The app role path is optional, but if it is not filled in, we do not know
@@ -299,7 +308,7 @@ func setupVaultKeyProvider() error {
 	runningServerConfig.SigningKeyProviderDetails = vaultKeyInfo
 	runningServerConfig.PublicKey = publicKey
 
-	fmt.Printf(Info + "Successfully retrieved signing key from Vault")
+	fmt.Println(Info + "Successfully retrieved signing key from Vault")
 	return nil
 }
 

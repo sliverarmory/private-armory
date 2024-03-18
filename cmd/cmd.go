@@ -81,6 +81,16 @@ func supportedStorageProviders() string {
 		", ")
 }
 
+func supportedSigningProviders() string {
+	return strings.Join([]string{
+		consts.SigningKeyProviderLocal,
+		consts.SigningKeyProviderAWS,
+		consts.SigningKeyProviderVault,
+		consts.SigningKeyProviderExternal,
+	},
+		", ")
+}
+
 func init() {
 	rootCmd.Flags().StringP(consts.ConfigFlagStr, "c", "", "Config file path")
 	rootCmd.MarkFlagFilename(consts.ConfigFileName, "json")
@@ -93,21 +103,33 @@ func init() {
 	rootCmd.Flags().StringP(consts.WriteTimeoutFlagStr, "W", "1m", "HTTP write timeout expressed as a duration")
 	rootCmd.Flags().BoolP(consts.RefreshFlagStr, "r", false, "Force refresh of armory index (may require password input)")
 
-	rootCmd.Flags().StringP(consts.StorageProviderNameFlagStr, "s", consts.LocalStorageProviderStr, fmt.Sprintf("Storage provider name (supported providers: %s)", supportedStorageProviders()))
-	rootCmd.Flags().StringToStringP(consts.StorageProviderOptionsFlagStr, "o", nil, "Options for the storage provider specified as KEY1=VALUE1,KEY2=VALUE2...")
+	rootCmd.Flags().StringP(consts.StorageProviderNameFlagStr,
+		"s",
+		"",
+		fmt.Sprintf("Storage provider name (supported providers: %s)", supportedStorageProviders()),
+	)
+	rootCmd.Flags().StringToStringP(consts.StorageProviderOptionsFlagStr,
+		"o",
+		nil,
+		"Options for the storage provider specified as KEY1=VALUE1,KEY2=VALUE2...",
+	)
 
-	rootCmd.Flags().StringP(consts.AWSSigningKeySecretNameFlagStr, "a", "", "Name for the signing key if using AWS Secrets Manager")
-	rootCmd.Flags().StringP(consts.AWSRegionFlagStr, "g", "us-west-2", "AWS region if using Secrets Manager")
-	rootCmd.Flags().StringP(consts.VaultURLFlagStr, "U", "", "Vault location as a URL")
-	rootCmd.Flags().StringP(consts.VaultAppRolePathFlagStr, "L", "", "The approle path for Vault")
-	rootCmd.Flags().StringP(consts.VaultRoleIDFlagStr, "I", "", "The GUID for the approle role ID in Vault")
-	rootCmd.Flags().StringP(consts.VaultSecretIDFlagStr, "S", "", "The GUID for the approle secret ID in Vault")
-	rootCmd.Flags().StringP(consts.VaultKeyPathFlagStr, "P", "", "The path to the signing key in Vault, including the field")
+	rootCmd.Flags().StringP(consts.SigningProviderNameFlagStr,
+		"g",
+		"",
+		fmt.Sprintf("Signing provider name (supported providers: %s)", supportedSigningProviders()),
+	)
+	rootCmd.Flags().StringToStringP(consts.SigningProviderOptionsFlagStr,
+		"n",
+		nil,
+		"Options for the signing key provider specified as KEY1=VALUE1,KEY2=VALUE2...",
+	)
+
 	rootCmd.Flags().StringP(consts.DomainFlagStr, "m", "", "The domain name or IP address that clients will use to connect to the armory")
 	rootCmd.Flags().BoolP(consts.EnableTLSFlagStr, "t", false, "Enable TLS for the armory (certificates must be placed in <armory-root>/certificates, see documentation)")
 	rootCmd.Flags().StringP(consts.RootDirFlagStr, "d", "", "Root armory directory (must be writable)")
 	rootCmd.MarkFlagDirname(consts.RootDirFlagStr)
-	rootCmd.Flags().StringP(consts.PublicKeyFlagStr, "K", "", "Public key for an external signing provider")
+	rootCmd.Flags().StringP(consts.ExternalPublicKeyKey, "K", "", "Public key for an external signing provider")
 
 	genSignatureCmd.Flags().StringP(consts.FileFlagStr, "f", "", "Path to output key")
 	genSignatureCmd.Flags().BoolP(consts.PasswordFlagStr, "p", false, "Prompt for password for generated key")

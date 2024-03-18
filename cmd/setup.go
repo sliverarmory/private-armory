@@ -173,13 +173,17 @@ func getAndStoreSigningKey() error {
 	var err error
 	var signingProvider string
 
-	// Check to see if the provider was passed in as an environment variable
-	signingKeyProviderEnv, signingKeyProviderSet := os.LookupEnv(consts.SigningKeyProviderEnvVar)
-	if signingKeyProviderSet {
-		signingProvider = signingKeyProviderEnv
-	} else if runningServerConfig.SigningKeyProviderName != "" {
+	// Check to see if we already got signing provider details from the command line
+	if runningServerConfig.SigningKeyProviderName != "" {
 		signingProvider = runningServerConfig.SigningKeyProviderName
+	} else {
+		// Check to see if the provider was passed in as an environment variable
+		signingKeyProviderEnv, signingKeyProviderSet := os.LookupEnv(consts.SigningKeyProviderEnvVar)
+		if signingKeyProviderSet {
+			signingProvider = signingKeyProviderEnv
+		}
 	}
+
 	if signingProvider != "" {
 		switch signingProvider {
 		case consts.SigningKeyProviderAWS:
@@ -611,7 +615,7 @@ func parseStorageProviderOptions(providerName string, providerOptions map[string
 		rootDir = options.BasePath
 		return rootDir, options, nil
 	case "":
-		// If the
+		// If the provider name is not given to us, then it will have to be figured out later
 		return rootDir, nil, nil
 	default:
 		return rootDir, nil, fmt.Errorf("unsupported storage provider %q", providerName)

@@ -35,7 +35,7 @@ type LocalStorageProvider struct {
 }
 
 type LocalStorageOptions struct {
-	BasePath string
+	BasePath string `json:"path"`
 }
 
 func checkAndCreateDirectory(name, path string, createAsNeeded bool) (bool, error) {

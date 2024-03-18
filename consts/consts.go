@@ -56,7 +56,6 @@ const (
 	RefreshFlagStr                = "refresh"
 	DomainFlagStr                 = "domain"
 	EnableTLSFlagStr              = "enable-tls"
-	PublicKeyFlagStr              = "public-key"
 	FileFlagStr                   = "file"
 	PasswordFlagStr               = "password"
 	PasswordFileFlagStr           = "password-file"
@@ -76,16 +75,7 @@ const (
 	PackageTypePathVariable = "package_type"
 	PackageNamePathVariable = "package_name"
 
-	// AWS
-	AWSSigningKeySecretNameFlagStr = "aws-key-name"
-	AWSRegionFlagStr               = "aws-region"
-
 	// Vault
-	VaultURLFlagStr         = "vault-url"
-	VaultAppRolePathFlagStr = "vault-approle-path"
-	VaultRoleIDFlagStr      = "vault-role-id"
-	VaultSecretIDFlagStr    = "vault-secret-id"
-	VaultKeyPathFlagStr     = "vault-path"
 	VaultDefaultAppRolePath = "approle"
 
 	// Environment variables
@@ -116,12 +106,15 @@ const (
 	// Signing Key Provider Details
 	AWSSecretNameKey        = "secret-name"
 	AWSRegionKey            = "region"
+	ExternalPublicKeyKey    = "public-key"
+	LocalKeyPasswordKey     = "password"
 	VaultAddrKey            = "addr"
 	VaultAppRolePathKey     = "app-role-path"
 	VaultAppRoleIDKey       = "roleID"
 	VaultAppSecretIDKey     = "secretID"
 	VaultKeyPathKey         = "key-path"
 	VaultCustomCAEnabledKey = "use-custom-ca"
+	VaultCustomCAPathKey    = "ca-path"
 
 	// Storage Providers
 	AWSS3StorageProviderStr = "s3"
