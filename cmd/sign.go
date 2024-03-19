@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"aead.dev/minisign"
 	"github.com/AlecAivazis/survey/v2"
@@ -173,7 +174,7 @@ func signPackageStandalone(packagePath string) error {
 		packageType = consts.AliasPackageType
 	}
 
-	packageName := ""
+	packageName := strings.TrimSuffix(filepath.Base(packagePath), ".tar.gz")
 	switch packageType {
 	case consts.AliasPackageType:
 		aliasManifest := &patterns.AliasManifest{}
@@ -181,7 +182,6 @@ func signPackageStandalone(packagePath string) error {
 		if err != nil {
 			return fmt.Errorf("could not parse package manifest: %s", err)
 		}
-		packageName = aliasManifest.Name
 	case consts.ExtensionPackageType:
 		extensionManifest := &patterns.ExtensionManifestV1{}
 		err := json.Unmarshal(manifestData, extensionManifest)
@@ -193,7 +193,6 @@ func signPackageStandalone(packagePath string) error {
 				return fmt.Errorf("could not parse package manifest: %s", err)
 			}
 		}
-		packageName = extensionManifest.Name
 	default:
 		return errors.New("the package is not a supported type")
 	}
