@@ -33,37 +33,43 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func invokeRefreshIndex(cmd *cobra.Command) {
+	fmt.Printf(Info + "Refreshing armory index ...\n")
+	err := getCommonInfoForSigningCmds(cmd)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	appLogFile, err := runningServerConfig.StorageProvider.GetLogger(consts.AppLogName)
+	if err != nil {
+		fmt.Printf("Failed to open app log: %s\n", err)
+		return
+	}
+	// Closing the log is handled when the application exits (see cmd.Execute())
+	appLog := log.StartLogger(appLogFile)
+	logrus.RegisterExitHandler(shutdownStorage)
+	appLog.Infoln("Refresh armory index invoked from command line")
+	errors := refreshArmoryIndex()
+	if len(errors) > 0 {
+		errMsg := "Failed to refresh armory index:"
+		fmt.Println(Warn + errMsg)
+		appLog.Errorln(errMsg)
+		for _, err := range errors {
+			appLog.Errorln(err)
+			fmt.Printf("%s%s\n", Warn, err)
+		}
+		return
+	}
+	appLog.Infoln("Successfully refreshed armory index")
+	fmt.Printf(Success + "Successfully refreshed armory index.\n")
+}
+
 var refreshCmd = &cobra.Command{
 	Use:   "refresh",
 	Short: "Refresh the armory index",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
-		err := getServerConfig(cmd)
-		if err != nil {
-			fmt.Printf("%s\n", err)
-			return
-		}
-		appLogFile, err := runningServerConfig.StorageProvider.GetLogger(consts.AppLogName)
-		if err != nil {
-			panic(fmt.Sprintf("Failed to open app log: %v", err))
-		}
-		// Closing the log is handled when the application exits (see cmd.Execute())
-		appLog := log.StartLogger(appLogFile)
-		logrus.RegisterExitHandler(shutdownStorage)
-		fmt.Printf(Info + "Refreshing armory index ...\n")
-		appLog.Infoln("Refresh armory index invoked from command line")
-		errors := refreshArmoryIndex()
-		if len(errors) > 0 {
-			fmt.Printf(Warn + "Failed to refresh armory index:\n")
-			appLog.Errorln("Failed to refresh armory index:")
-			for _, err := range errors {
-				appLog.Errorln(err)
-				fmt.Printf("%s%s\n", Warn, err)
-			}
-			return
-		}
-		appLog.Infoln("Successfully refreshed armory index")
-		fmt.Printf(Success + "Successfully refreshed armory index.\n")
+		invokeRefreshIndex(cmd)
 	},
 }
 

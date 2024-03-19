@@ -313,32 +313,6 @@ var signIndexCmd = &cobra.Command{
 	Short: "Sign a package index",
 	Long:  "",
 	Run: func(cmd *cobra.Command, args []string) {
-		err := getCommonInfoForSigningCmds(cmd)
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-		appLogFile, err := runningServerConfig.StorageProvider.GetLogger(consts.AppLogName)
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-		// Closing the logger is taken care of when this function returns to cmd.Execute()
-		appLog := log.StartLogger(appLogFile)
-		logrus.RegisterExitHandler(shutdownStorage)
-		appLog.Infoln("Sign index manually invoked")
-		errors := refreshArmoryIndex()
-		if len(errors) > 0 {
-			errMsg := "Encountered the following error(s) while refreshing the index:"
-			appLog.Errorln(errMsg)
-			fmt.Println(errMsg)
-			for _, err := range errors {
-				appLog.Errorln(err)
-				fmt.Printf("%s%s\n", Warn, err)
-			}
-			return
-		}
-		appLog.Infoln("Successfully refreshed and signed package index")
-		fmt.Println(Success + "Refreshed and signed index")
+		invokeRefreshIndex(cmd)
 	},
 }

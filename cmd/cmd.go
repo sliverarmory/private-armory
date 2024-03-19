@@ -134,7 +134,7 @@ func init() {
 	genSignatureCmd.Flags().StringP(consts.FileFlagStr, "f", "", "Path to output key")
 	genSignatureCmd.Flags().BoolP(consts.PasswordFlagStr, "p", false, "Prompt for password for generated key")
 
-	signCmd.PersistentFlags().BoolP(consts.PasswordFlagStr, "p", false, "Prompt for password for the private key")
+	signCmd.PersistentFlags().BoolP(consts.PasswordFlagStr, "p", false, "Prompt for password for the signing key")
 	signCmd.PersistentFlags().StringP(consts.PasswordFileFlagStr, "a", "", "Path to a file containing the password")
 
 	signPackageCmd.Flags().StringP(consts.ConfigFlagStr, "c", "", "Path to a configuration file for the armory (required)")
@@ -163,6 +163,8 @@ func init() {
 
 	refreshCmd.Flags().StringP(consts.ConfigFlagStr, "c", "", "Config file path")
 	refreshCmd.MarkFlagFilename(consts.ConfigFlagStr, "json")
+	refreshCmd.Flags().BoolP(consts.PasswordFlagStr, "p", false, "Prompt for password for the signing key")
+	refreshCmd.Flags().StringP(consts.PasswordFileFlagStr, "a", "", "Path to a file containing the password")
 	refreshCmd.Flags().StringToStringP(consts.StorageProviderOptionsFlagStr,
 		"o",
 		nil,
@@ -334,7 +336,6 @@ var rootCmd = &cobra.Command{
 		signal.Notify(sig, os.Interrupt)
 		<-sig
 		fmt.Println(Info + "Caught interrupt signal. Shutting down...")
-		//logrus.Exit(0)
 	},
 }
 
