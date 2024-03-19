@@ -134,7 +134,6 @@ func init() {
 	genSignatureCmd.Flags().StringP(consts.FileFlagStr, "f", "", "Path to output key")
 	genSignatureCmd.Flags().BoolP(consts.PasswordFlagStr, "p", false, "Prompt for password for generated key")
 
-	signCmd.PersistentFlags().StringP(consts.KeyFlagStr, "k", "", "Path to the private key")
 	signCmd.PersistentFlags().BoolP(consts.PasswordFlagStr, "p", false, "Prompt for password for the private key")
 	signCmd.PersistentFlags().StringP(consts.PasswordFileFlagStr, "a", "", "Path to a file containing the password")
 
