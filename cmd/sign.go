@@ -186,7 +186,12 @@ func signPackageStandalone(packagePath string) error {
 		extensionManifest := &patterns.ExtensionManifestV1{}
 		err := json.Unmarshal(manifestData, extensionManifest)
 		if err != nil {
-			return fmt.Errorf("could not parse package manifest: %s", err)
+			// Try a V2 manifest
+			extensionManifest := &patterns.ExtensionManifestV2{}
+			err = json.Unmarshal(manifestData, extensionManifest)
+			if err != nil {
+				return fmt.Errorf("could not parse package manifest: %s", err)
+			}
 		}
 		packageName = extensionManifest.Name
 	default:
