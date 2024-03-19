@@ -515,7 +515,7 @@ func getS3BucketRegion(bucketName string) (string, error) {
 	return s3Region, nil
 }
 
-func initializeStorageProviderFromPath(path string) (storage.StorageProvider, error) {
+func initializeStorageProviderFromPath(path string, storageOptions map[string]string) (storage.StorageProvider, error) {
 	var storageProvider storage.StorageProvider
 	var tempServerConfig api.ArmoryServerConfig
 
@@ -530,9 +530,12 @@ func initializeStorageProviderFromPath(path string) (storage.StorageProvider, er
 		bucketDir := strings.TrimPrefix(filepath.Dir(parsedPath.Path), "/")
 		bucketConfigFilePath := strings.TrimPrefix(parsedPath.Path, "/")
 		// Try to get the region
-		region, err := getS3BucketRegion(parsedPath.Host)
-		if err != nil {
-			return nil, err
+		region, ok := storageOptions[consts.AWSRegionKey]
+		if !ok {
+			region, err = getS3BucketRegion(parsedPath.Host)
+			if err != nil {
+				return nil, err
+			}
 		}
 		storageProvider = &storage.S3StorageProvider{}
 		err = storageProvider.New(storage.S3StorageOptions{
@@ -631,9 +634,14 @@ func getStorageProvider(cmd *cobra.Command) (storage.StorageProvider, string, er
 		return nil, "", fmt.Errorf("error parsing flag --%s, %s", consts.ConfigFlagStr, err)
 	}
 
+	storageProviderOptions, err := cmd.Flags().GetStringToString(consts.StorageProviderOptionsFlagStr)
+	if err != nil {
+		return nil, "", fmt.Errorf("error parsing flag --%s, %s", consts.StorageProviderOptionsFlagStr, err)
+	}
+
 	if configPath != "" {
 		// Attempt to bootstrap the storage provider from the config file
-		storageProvider, err = initializeStorageProviderFromPath(configPath)
+		storageProvider, err = initializeStorageProviderFromPath(configPath, storageProviderOptions)
 		return storageProvider, configPath, err
 	}
 
@@ -642,11 +650,6 @@ func getStorageProvider(cmd *cobra.Command) (storage.StorageProvider, string, er
 		return nil, "", fmt.Errorf("error parsing flag --%s, %s", consts.StorageProviderNameFlagStr, err)
 	}
 	storageProviderName = strings.ToLower(storageProviderName)
-
-	storageProviderOptions, err := cmd.Flags().GetStringToString(consts.StorageProviderOptionsFlagStr)
-	if err != nil {
-		return nil, "", fmt.Errorf("error parsing flag --%s, %s", consts.StorageProviderOptionsFlagStr, err)
-	}
 
 	// We may be able to derive the root dir from the provided storage options, so check that first
 	rootDir, storageOptions, err := parseStorageProviderOptions(storageProviderName, storageProviderOptions)

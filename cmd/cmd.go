@@ -139,12 +139,22 @@ func init() {
 
 	signPackageCmd.Flags().StringP(consts.ConfigFlagStr, "c", "", "Path to a configuration file for the armory (required)")
 	signPackageCmd.Flags().StringP(consts.FileFlagStr, "f", "", "Path to the package to sign (required)")
+	signPackageCmd.Flags().StringToStringP(consts.StorageProviderOptionsFlagStr,
+		"o",
+		nil,
+		"Options for the storage provider specified as KEY1=VALUE1,KEY2=VALUE2...",
+	)
 	signPackageCmd.MarkFlagFilename(consts.ConfigFlagStr, "json")
 	signPackageCmd.MarkFlagRequired(consts.ConfigFlagStr)
 	signPackageCmd.MarkFlagFilename(consts.FileFlagStr, "tar.gz")
 	signPackageCmd.MarkFlagRequired(consts.FileFlagStr)
 
 	signIndexCmd.Flags().StringP(consts.ConfigFlagStr, "c", "", "Path to a configuration file for the armory (required)")
+	signIndexCmd.Flags().StringToStringP(consts.StorageProviderOptionsFlagStr,
+		"o",
+		nil,
+		"Options for the storage provider specified as KEY1=VALUE1,KEY2=VALUE2...",
+	)
 	signIndexCmd.MarkFlagFilename(consts.ConfigFileName, "json")
 	signIndexCmd.MarkFlagRequired(consts.ConfigFlagStr)
 
@@ -153,6 +163,11 @@ func init() {
 
 	refreshCmd.Flags().StringP(consts.ConfigFlagStr, "c", "", "Config file path")
 	refreshCmd.MarkFlagFilename(consts.ConfigFlagStr, "json")
+	refreshCmd.Flags().StringToStringP(consts.StorageProviderOptionsFlagStr,
+		"o",
+		nil,
+		"Options for the storage provider specified as KEY1=VALUE1,KEY2=VALUE2...",
+	)
 	rootCmd.AddCommand(refreshCmd)
 	rootCmd.AddCommand(genSignatureCmd)
 	rootCmd.AddCommand(signCmd)
