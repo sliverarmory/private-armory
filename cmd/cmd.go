@@ -173,7 +173,7 @@ func init() {
 	rootCmd.AddCommand(signCmd)
 }
 
-func shutdownServer() {
+func shutdownStorage() {
 	// Make sure to take care of any tasks that need to be done before the logs are closed
 	errors := runningServerConfig.StorageProvider.CloseLogger()
 	if len(errors) > 1 {
@@ -188,7 +188,10 @@ func shutdownServer() {
 	if err != nil {
 		fmt.Printf(Warn+"Encountered an error while shutting down the storage provider: %s\n", err)
 	}
+}
 
+func shutdownServer() {
+	shutdownStorage()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	server.HTTPServer.Shutdown(ctx)
@@ -244,7 +247,7 @@ var rootCmd = &cobra.Command{
 				for _, err := range errors {
 					appLog.Errorln(err)
 				}
-				os.Exit(2)
+				logrus.Exit(2)
 			}
 		}
 
@@ -321,7 +324,7 @@ var rootCmd = &cobra.Command{
 			}
 			if err != nil {
 				appLog.Errorf("Listener error: %s", err)
-				os.Exit(1)
+				logrus.Exit(1)
 			}
 		}()
 
@@ -331,13 +334,14 @@ var rootCmd = &cobra.Command{
 		signal.Notify(sig, os.Interrupt)
 		<-sig
 		fmt.Println(Info + "Caught interrupt signal. Shutting down...")
-		logrus.Exit(0)
+		//logrus.Exit(0)
 	},
 }
 
 // Execute - Execute the root command
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
+		logrus.Exit(1)
 	}
+	logrus.Exit(0)
 }

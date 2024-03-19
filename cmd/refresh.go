@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"path"
 
+	"github.com/sirupsen/logrus"
 	"github.com/sliverarmory/external-armory/api"
 	"github.com/sliverarmory/external-armory/api/storage"
 	"github.com/sliverarmory/external-armory/consts"
@@ -46,17 +47,22 @@ var refreshCmd = &cobra.Command{
 		if err != nil {
 			panic(fmt.Sprintf("Failed to open app log: %v", err))
 		}
+		// Closing the log is handled when the application exits (see cmd.Execute())
 		appLog := log.StartLogger(appLogFile)
+		logrus.RegisterExitHandler(shutdownStorage)
 		fmt.Printf(Info + "Refreshing armory index ...\n")
+		appLog.Infoln("Refresh armory index invoked from command line")
 		errors := refreshArmoryIndex()
 		if len(errors) > 0 {
 			fmt.Printf(Warn + "Failed to refresh armory index:\n")
+			appLog.Errorln("Failed to refresh armory index:")
 			for _, err := range errors {
 				appLog.Errorln(err)
 				fmt.Printf("%s%s\n", Warn, err)
 			}
 			return
 		}
+		appLog.Infoln("Successfully refreshed armory index")
 		fmt.Printf(Success + "Successfully refreshed armory index.\n")
 	},
 }

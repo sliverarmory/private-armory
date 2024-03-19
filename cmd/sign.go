@@ -10,10 +10,12 @@ import (
 
 	"aead.dev/minisign"
 	"github.com/AlecAivazis/survey/v2"
+	"github.com/sirupsen/logrus"
 	"github.com/sliverarmory/external-armory/api"
 	"github.com/sliverarmory/external-armory/api/patterns"
 	"github.com/sliverarmory/external-armory/api/signing"
 	"github.com/sliverarmory/external-armory/consts"
+	"github.com/sliverarmory/external-armory/log"
 	"github.com/sliverarmory/external-armory/util"
 	"github.com/spf13/cobra"
 )
@@ -284,12 +286,25 @@ var signPackageCmd = &cobra.Command{
 			fmt.Println(err)
 			return
 		}
-		err = signPackageStandalone(packagePath)
+		appLogFile, err := runningServerConfig.StorageProvider.GetLogger(consts.AppLogName)
 		if err != nil {
-			fmt.Printf(Warn+"could not sign package %q: %s\n", packagePath, err)
+			fmt.Println(err)
 			return
 		}
-		fmt.Printf(Success+"Signed package %s successfully\n", filepath.Base(packagePath))
+		// Closing the logger is taken care of when this function returns to cmd.Execute()
+		appLog := log.StartLogger(appLogFile)
+		logrus.RegisterExitHandler(shutdownStorage)
+		err = signPackageStandalone(packagePath)
+		appLog.Infoln(fmt.Sprintf("Sign package invoked (%s)", filepath.Base(packagePath)))
+		if err != nil {
+			errorMsg := fmt.Sprintf("could not sign package %q: %s", packagePath, err)
+			fmt.Println(Warn + errorMsg)
+			appLog.Errorln(errorMsg)
+			return
+		}
+		successMsg := fmt.Sprintf("Signed package %s successfully", filepath.Base(packagePath))
+		appLog.Infoln(successMsg)
+		fmt.Println(Success + successMsg)
 	},
 }
 
@@ -303,13 +318,27 @@ var signIndexCmd = &cobra.Command{
 			fmt.Println(err)
 			return
 		}
+		appLogFile, err := runningServerConfig.StorageProvider.GetLogger(consts.AppLogName)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		// Closing the logger is taken care of when this function returns to cmd.Execute()
+		appLog := log.StartLogger(appLogFile)
+		logrus.RegisterExitHandler(shutdownStorage)
+		appLog.Infoln("Sign index manually invoked")
 		errors := refreshArmoryIndex()
 		if len(errors) > 0 {
+			errMsg := "Encountered the following error(s) while refreshing the index:"
+			appLog.Errorln(errMsg)
+			fmt.Println(errMsg)
 			for _, err := range errors {
+				appLog.Errorln(err)
 				fmt.Printf("%s%s\n", Warn, err)
 			}
 			return
 		}
+		appLog.Infoln("Successfully refreshed and signed package index")
 		fmt.Println(Success + "Refreshed and signed index")
 	},
 }
