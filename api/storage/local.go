@@ -262,7 +262,8 @@ func (lsp *LocalStorageProvider) Close() error {
 	// Errors would only be generated when closing the log files in cases when the log file
 	// was previously closed. We do not need to worry about that kind of error when tearing
 	// down the provider.
-	lsp.CloseLogger()
+	lsp.CloseLogging()
+	lsp.initialized = false
 	return lsp.packageWatcher.Close()
 }
 
@@ -271,7 +272,7 @@ func (lsp *LocalStorageProvider) Destroy() error {
 	// Errors would only be generated when closing the log files in cases when the log file
 	// was previously closed. We do not need to worry about that kind of error when tearing
 	// down the provider.
-	lsp.CloseLogger()
+	lsp.CloseLogging()
 	return os.RemoveAll(lsp.basePath)
 }
 
@@ -453,7 +454,8 @@ func (lsp *LocalStorageProvider) ReadPackage(packageName string) ([]byte, error)
 				if errors.Is(aliasErr, os.ErrNotExist) {
 					return nil, fmt.Errorf("%q does not exist as either an alias or an extension", packageName)
 				} else {
-					return nil, fmt.Errorf("%q does not exist as an extension, and getting information about %q as an alias failed: %s", packageName, packageName, aliasErr)
+					return nil, fmt.Errorf("%q does not exist as an extension, and getting information about %q as an alias failed: %s",
+						packageName, packageName, aliasErr)
 				}
 			}
 		} else {
@@ -578,7 +580,8 @@ func (lsp *LocalStorageProvider) ListPackages(packageType consts.PackageType) (m
 				continue
 			}
 			if strings.TrimSuffix(entry.Name(), ".tar.gz") != manifest.CommandName {
-				allErrors = append(allErrors, fmt.Errorf("invalid file name %q, expected %q", entry.Name(), fmt.Sprintf("%s.tar.gz", manifest.CommandName)))
+				allErrors = append(allErrors, fmt.Errorf("invalid file name %q, expected %q", entry.Name(),
+					fmt.Sprintf("%s.tar.gz", manifest.CommandName)))
 				continue
 			}
 			manifests[manifest.Name] = PackageEntry{
@@ -618,7 +621,8 @@ func (lsp *LocalStorageProvider) ListPackages(packageType consts.PackageType) (m
 				isV2Manifest = true
 			}
 			if !isV2Manifest && strings.TrimSuffix(entry.Name(), ".tar.gz") != manifest.CommandName {
-				allErrors = append(allErrors, fmt.Errorf("invalid file name %q, expected %q", entry.Name(), fmt.Sprintf("%s.tar.gz", manifest.CommandName)))
+				allErrors = append(allErrors, fmt.Errorf("invalid file name %q, expected %q", entry.Name(),
+					fmt.Sprintf("%s.tar.gz", manifest.CommandName)))
 				continue
 			}
 			manifests[manifest.CommandName] = PackageEntry{
@@ -709,7 +713,7 @@ func (lsp *LocalStorageProvider) GetLogger(logName string) (io.Writer, error) {
 	return logFile, err
 }
 
-func (lsp *LocalStorageProvider) CloseLogger() []error {
+func (lsp *LocalStorageProvider) CloseLogging() []error {
 	if !lsp.initialized {
 		return []error{ErrStorageNotInitialized}
 	}

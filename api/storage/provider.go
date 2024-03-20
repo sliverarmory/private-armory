@@ -119,7 +119,7 @@ type StorageProvider interface {
 	// Return the named logging backend (io.Writer)
 	GetLogger(string) (io.Writer, error)
 	// Close the logging backend (returns multiple errors because there could be multiple backends)
-	CloseLogger() []error
+	CloseLogging() []error
 	// For Vault
 	// Return the custom CA PEM file for the configured Vault
 	ReadVaultCA() ([]byte, error)
@@ -128,6 +128,8 @@ type StorageProvider interface {
 }
 
 // Common functions
+// Each package type contains a manifest at a specific location. This function looks for the
+// manifest and returns the type of package depending on the type of manifest found (if any).
 func derivePackageTypeFromArchive(archiveData []byte) consts.PackageType {
 	// Try to find the alias manifest
 	manifest, err := util.ReadFileFromTarGzMemory(archiveData, consts.AliasArchiveManifestFilePath)
@@ -162,6 +164,7 @@ type StoragePaths struct {
 	VaultCAPEM        string
 }
 
+// Returns paths corresponding to directories
 func (sp *StoragePaths) Directories() map[string]string {
 	return map[string]string{
 		"aliases":            sp.Aliases,
@@ -172,6 +175,7 @@ func (sp *StoragePaths) Directories() map[string]string {
 	}
 }
 
+// Returns paths corresponding to files
 func (sp *StoragePaths) Files() map[string]string {
 	return map[string]string{
 		"bundle information":     sp.Bundles,
@@ -185,4 +189,5 @@ func (sp *StoragePaths) Files() map[string]string {
 	}
 }
 
+// An empty interface for storage options. The exact implementation depends on the storage provider.
 type StorageOptions interface{}

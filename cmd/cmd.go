@@ -177,7 +177,7 @@ func init() {
 
 func shutdownStorage() {
 	// Make sure to take care of any tasks that need to be done before the logs are closed
-	errors := runningServerConfig.StorageProvider.CloseLogger()
+	errors := runningServerConfig.StorageProvider.CloseLogging()
 	if len(errors) > 1 {
 		fmt.Println(Warn + "Encountered the following errors while shutting down loggers:")
 	} else if len(errors) == 1 {
@@ -298,8 +298,7 @@ var rootCmd = &cobra.Command{
 						if !ok {
 							return
 						}
-						appLog.Errorf("Watcher received an error, shutting down package watcher: %s", err)
-						return
+						appLog.Errorf("Watcher received an error: %s", err)
 					}
 				}
 			}()

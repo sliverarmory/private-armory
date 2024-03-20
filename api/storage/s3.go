@@ -36,19 +36,22 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
 	"github.com/sliverarmory/external-armory/api/patterns"
+	"github.com/sliverarmory/external-armory/api/watcher"
 	"github.com/sliverarmory/external-armory/consts"
 	"github.com/sliverarmory/external-armory/util"
 )
 
 type S3StorageProvider struct {
-	baseBucket     string
-	initialized    bool
-	paths          StoragePaths
-	isNew          bool
-	refreshEnabled bool
-	s3Client       *s3.Client
-	options        S3StorageOptions
-	loggers        map[string]*os.File
+	baseBucket      string
+	initialized     bool
+	paths           StoragePaths
+	isNew           bool
+	refreshEnabled  bool
+	s3Client        *s3.Client
+	options         S3StorageOptions
+	loggers         map[string]*os.File
+	watcher         watcher.S3Watcher
+	refreshSetupErr error
 }
 
 type S3StorageOptions struct {
@@ -57,6 +60,7 @@ type S3StorageOptions struct {
 	Directory  string `json:"directory"`
 }
 
+// Decode errors from S3 into errors that storage providers emit
 func decodeError(err error) error {
 	var s3APIError smithy.APIError
 
@@ -70,7 +74,6 @@ func decodeError(err error) error {
 			return ErrDoesNotExist
 
 		default:
-			fmt.Printf("I got error: %v\n", s3APIError)
 			return err
 		}
 	} else {
@@ -268,7 +271,7 @@ func (ssp *S3StorageProvider) New(options StorageOptions, createAsNeeded bool) e
 	ssp.baseBucket = ssp.options.BucketName
 	// Have to log locally because objects in S3 are immutable
 	ssp.loggers = map[string]*os.File{}
-	ssp.refreshEnabled = false
+
 	ssp.initialized = true
 
 	// If there is no config file, assume the armory is new
@@ -289,6 +292,40 @@ func (ssp *S3StorageProvider) New(options StorageOptions, createAsNeeded bool) e
 	if err != nil {
 		ssp.initialized = false
 		return fmt.Errorf("error creating default bundle file: %s", err)
+	}
+
+	// Set up bucket monitoring
+	ssp.watcher = watcher.S3Watcher{}
+	err = ssp.watcher.New(watcher.S3WatcherOptions{
+		S3Client:        ssp.s3Client,
+		PollTimeSeconds: 5,
+	})
+	if err != nil {
+		ssp.refreshSetupErr = fmt.Errorf("error setting up watcher: %s", err)
+		ssp.refreshEnabled = false
+	} else {
+		err = ssp.watcher.Add(ssp.baseBucket, ssp.paths.Aliases)
+		if err != nil {
+			ssp.refreshSetupErr = fmt.Errorf("error adding alias path %q to watcher: %s", ssp.paths.Aliases, err)
+			ssp.refreshEnabled = false
+			ssp.watcher.Close()
+			return nil
+		}
+		err = ssp.watcher.Add(ssp.baseBucket, ssp.paths.Extensions)
+		if err != nil {
+			ssp.refreshSetupErr = fmt.Errorf("error adding extension path %q to watcher: %s", ssp.paths.Extensions, err)
+			ssp.refreshEnabled = false
+			ssp.watcher.Close()
+			return nil
+		}
+		err = ssp.watcher.Add(ssp.baseBucket, ssp.paths.Bundles)
+		if err != nil {
+			ssp.refreshSetupErr = fmt.Errorf("error adding bundle path %q to watcher: %s", ssp.paths.Bundles, err)
+			ssp.refreshEnabled = false
+			ssp.watcher.Close()
+			return nil
+		}
+		ssp.refreshEnabled = true
 	}
 	return nil
 }
@@ -314,18 +351,42 @@ func (ssp *S3StorageProvider) Paths() (*StoragePaths, error) {
 }
 
 func (ssp *S3StorageProvider) AutoRefreshEnabled() (bool, error) {
-	return ssp.refreshEnabled, nil
+	return ssp.refreshEnabled, ssp.refreshSetupErr
 }
 
 func (ssp *S3StorageProvider) AutoRefreshChannels() (chan string, chan error, error) {
-	return nil, nil, nil
+	if !ssp.initialized {
+		return nil, nil, ErrStorageNotInitialized
+	}
+
+	if ssp.refreshSetupErr != nil || !ssp.refreshEnabled {
+		return nil, nil, ssp.refreshSetupErr
+	}
+
+	watcherEvents, err := ssp.watcher.EventChannel()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	watcherErrors, err := ssp.watcher.ErrorChannel()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return watcherEvents, watcherErrors, nil
 }
 
 func (ssp *S3StorageProvider) Close() error {
 	// Errors would only be generated when closing the log files in cases when the log file
 	// was previously closed. We do not need to worry about that kind of error when tearing
 	// down the provider.
-	ssp.CloseLogger()
+	if len(ssp.loggers) > 0 {
+		ssp.CloseLogging()
+	}
+
+	ssp.watcher.Close()
+
+	ssp.initialized = false
 
 	// The S3 client does not have a close function
 	return nil
@@ -801,7 +862,7 @@ func (ssp *S3StorageProvider) GetLogger(logName string) (io.Writer, error) {
 	// would continuously update. Instead, we will make a temp file locally that gets
 	// uploaded once it is closed
 	// Blank string for the first argument means the OS temp directory
-	logFile, err := os.CreateTemp("", "armory-logger-*")
+	logFile, err := os.CreateTemp("", fmt.Sprintf("armory-logger-%s-*", logName))
 	if err != nil {
 		return nil, err
 	}
@@ -810,10 +871,10 @@ func (ssp *S3StorageProvider) GetLogger(logName string) (io.Writer, error) {
 
 	ssp.loggers[logName] = logFile
 
-	return logFile, err
+	return logFile, nil
 }
 
-func (ssp *S3StorageProvider) CloseLogger() []error {
+func (ssp *S3StorageProvider) CloseLogging() []error {
 	if !ssp.initialized {
 		return []error{ErrStorageNotInitialized}
 	}
