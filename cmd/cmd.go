@@ -176,6 +176,9 @@ func init() {
 
 func shutdownStorage() {
 	// Make sure to take care of any tasks that need to be done before the logs are closed
+	if !runningServerConfig.StorageProvider.Initialized() {
+		return
+	}
 	errors := runningServerConfig.StorageProvider.CloseLogging()
 	if len(errors) > 1 {
 		fmt.Println(Warn + "Encountered the following errors while shutting down loggers:")

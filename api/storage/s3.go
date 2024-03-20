@@ -389,7 +389,9 @@ func (ssp *S3StorageProvider) Close() error {
 		ssp.CloseLogging()
 	}
 
-	ssp.watcher.Close()
+	if ssp.refreshEnabled {
+		ssp.watcher.Close()
+	}
 
 	ssp.initialized = false
 

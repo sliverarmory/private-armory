@@ -268,7 +268,12 @@ func (lsp *LocalStorageProvider) Close() error {
 	// down the provider.
 	lsp.CloseLogging()
 	lsp.initialized = false
-	return lsp.packageWatcher.Close()
+
+	if lsp.refreshEnabled {
+		return lsp.packageWatcher.Close()
+	} else {
+		return nil
+	}
 }
 
 func (lsp *LocalStorageProvider) Destroy() error {
@@ -718,10 +723,6 @@ func (lsp *LocalStorageProvider) GetLogger(logName string) (io.Writer, error) {
 }
 
 func (lsp *LocalStorageProvider) CloseLogging() []error {
-	if !lsp.initialized {
-		return []error{ErrStorageNotInitialized}
-	}
-
 	allErrors := []error{}
 
 	return allErrors
