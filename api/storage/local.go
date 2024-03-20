@@ -146,7 +146,7 @@ func (lsp *LocalStorageProvider) setUpPackageWatcher() {
 	}
 }
 
-func (lsp *LocalStorageProvider) New(options StorageOptions, createAsNeeded bool) error {
+func (lsp *LocalStorageProvider) New(options StorageOptions, createAsNeeded, refreshEnabled bool) error {
 	// Make sure the base path exists
 	localOptions, ok := options.(LocalStorageOptions)
 	if !ok {
@@ -214,10 +214,14 @@ func (lsp *LocalStorageProvider) New(options StorageOptions, createAsNeeded bool
 	lsp.initialized = true
 
 	// Attempt to start package watcher / auto refresh
-	lsp.refreshSetupErr = nil
-	lsp.refreshEventChannel = make(chan string)
-	lsp.refreshErrorChannel = make(chan error)
-	lsp.setUpPackageWatcher()
+	if refreshEnabled {
+		lsp.refreshSetupErr = nil
+		lsp.refreshEventChannel = make(chan string)
+		lsp.refreshErrorChannel = make(chan error)
+		lsp.setUpPackageWatcher()
+	} else {
+		lsp.refreshEnabled = false
+	}
 
 	return nil
 }

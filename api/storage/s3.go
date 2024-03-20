@@ -197,7 +197,7 @@ func (ssp *S3StorageProvider) listObjects(objectBasePath string) ([]string, erro
 	return objectKeys, nil
 }
 
-func (ssp *S3StorageProvider) New(options StorageOptions, createAsNeeded bool) error {
+func (ssp *S3StorageProvider) New(options StorageOptions, createAsNeeded, refreshEnabled bool) error {
 	s3Options, ok := options.(S3StorageOptions)
 	if !ok {
 		return errors.New("invalid options provided")
@@ -295,6 +295,11 @@ func (ssp *S3StorageProvider) New(options StorageOptions, createAsNeeded bool) e
 	}
 
 	// Set up bucket monitoring
+	if !refreshEnabled {
+		ssp.refreshEnabled = false
+		return nil
+	}
+
 	ssp.watcher = watcher.S3Watcher{}
 	err = ssp.watcher.New(watcher.S3WatcherOptions{
 		S3Client:        ssp.s3Client,

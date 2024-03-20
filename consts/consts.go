@@ -125,6 +125,7 @@ const (
 	AWSS3BucketOptionStr          = "bucket"
 	AWSS3BucketDirectoryOptionStr = "directory"
 	LocalStoragePathOptionStr     = "path"
+	DisableAutoRefreshOptionStr   = "disable-refresh"
 
 	// Should not be edited directly, so hide them
 	ArmoryIndexFileName    = ".armory-index.json"

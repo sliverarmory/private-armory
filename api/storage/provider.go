@@ -44,8 +44,10 @@ onto the storage provider as opposed to having a single read or write file funct
 to be supplied by the caller.
 */
 type StorageProvider interface {
-	// New sets up a new instance of the storage provider with a given base path
-	New(StorageOptions, bool) error
+	// New sets up a new instance of the storage provider with the options appropriate for that storage provider.
+	// The storage provider also accepts two booleans: the first determines whether directories are created as needed and
+	// the second determines whether to enable auto refreshing of the package index.
+	New(StorageOptions, bool, bool) error
 	// Returns the name of the storage provider
 	Name() string
 	// Returns the options that the storager provider is configured with

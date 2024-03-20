@@ -524,6 +524,14 @@ func initializeStorageProviderFromPath(path string, storageOptions map[string]st
 		return nil, fmt.Errorf("could not parse path %q: %s", path, err)
 	}
 
+	// Refreshing is enabled unless there has been an option supplied to turn it off
+	autoRefreshEnabled := true
+	refreshValue := storageOptions[consts.DisableAutoRefreshOptionStr]
+	refreshValue = strings.ToLower(refreshValue)
+	if refreshValue == "yes" || refreshValue == "true" {
+		autoRefreshEnabled = false
+	}
+
 	switch parsedPath.Scheme {
 	case consts.AWSS3StorageProviderStr:
 		// The "host" is the bucket name
@@ -542,7 +550,7 @@ func initializeStorageProviderFromPath(path string, storageOptions map[string]st
 			BucketName: parsedPath.Host,
 			Directory:  bucketDir,
 			Region:     region,
-		}, true)
+		}, true, autoRefreshEnabled)
 		if err != nil {
 			return nil, err
 		}
@@ -584,7 +592,7 @@ func initializeStorageProviderFromPath(path string, storageOptions map[string]st
 			localPath = path
 		}
 		storageProvider = &storage.LocalStorageProvider{}
-		err = storageProvider.New(storage.LocalStorageOptions{BasePath: localPath}, true)
+		err = storageProvider.New(storage.LocalStorageOptions{BasePath: localPath}, true, autoRefreshEnabled)
 		if err != nil {
 			return nil, err
 		}
@@ -639,6 +647,11 @@ func getStorageProvider(cmd *cobra.Command) (storage.StorageProvider, string, er
 		return nil, "", fmt.Errorf("error parsing flag --%s, %s", consts.StorageProviderOptionsFlagStr, err)
 	}
 
+	// If this function is called from a sign command, we do not need to enable auto-refresh
+	if cmd.Parent() != nil && strings.HasSuffix(cmd.Parent().CommandPath(), "sign") {
+		storageProviderOptions[consts.DisableAutoRefreshOptionStr] = "yes"
+	}
+
 	if configPath != "" {
 		// Attempt to bootstrap the storage provider from the config file
 		storageProvider, err = initializeStorageProviderFromPath(configPath, storageProviderOptions)
@@ -678,6 +691,14 @@ func getStorageProvider(cmd *cobra.Command) (storage.StorageProvider, string, er
 		}
 	}
 
+	// Refreshing is enabled unless there has been an option supplied to turn it off
+	autoRefreshEnabled := true
+	refreshValue := storageProviderOptions[consts.DisableAutoRefreshOptionStr]
+	refreshValue = strings.ToLower(refreshValue)
+	if refreshValue == "yes" || refreshValue == "true" {
+		autoRefreshEnabled = false
+	}
+
 	// Determine what type of provider to set up based on the path passed in
 	parsedDirPath, err := url.Parse(rootDir)
 	if err != nil {
@@ -707,14 +728,14 @@ func getStorageProvider(cmd *cobra.Command) (storage.StorageProvider, string, er
 			Directory:  bucketDir,
 			Region:     s3Region,
 		}
-		err = storageProvider.New(storageOptions, true)
+		err = storageProvider.New(storageOptions, true, autoRefreshEnabled)
 		if err != nil {
 			return nil, "", err
 		}
 	case "", "file":
 		storageProvider = &storage.LocalStorageProvider{}
 		storageOptions := storage.LocalStorageOptions{BasePath: parsedDirPath.Path}
-		err = storageProvider.New(storageOptions, true)
+		err = storageProvider.New(storageOptions, true, autoRefreshEnabled)
 		if err != nil {
 			return nil, "", err
 		}
