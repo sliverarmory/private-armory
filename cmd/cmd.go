@@ -129,7 +129,6 @@ func init() {
 	rootCmd.Flags().BoolP(consts.EnableTLSFlagStr, "t", false, "Enable TLS for the armory (certificates must be placed in <armory-root>/certificates, see documentation)")
 	rootCmd.Flags().StringP(consts.RootDirFlagStr, "d", "", "Root armory directory (must be writable)")
 	rootCmd.MarkFlagDirname(consts.RootDirFlagStr)
-	rootCmd.Flags().StringP(consts.ExternalPublicKeyKey, "K", "", "Public key for an external signing provider")
 
 	genSignatureCmd.Flags().StringP(consts.FileFlagStr, "f", "", "Path to output key")
 	genSignatureCmd.Flags().BoolP(consts.PasswordFlagStr, "p", false, "Prompt for password for generated key")
