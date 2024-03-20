@@ -83,21 +83,6 @@ func getSigningKey(password string) (*minisign.PrivateKey, string, error) {
 	return &privateKey, source, nil
 }
 
-func displayPublicKey(password string) {
-	privateKey, source, err := getSigningKey(password)
-	if err != nil {
-		fmt.Printf(Warn+"error getting signing key from %s: %s\n", source, err)
-		return
-	}
-	publicKey, ok := privateKey.Public().(minisign.PublicKey)
-	if !ok {
-		fmt.Printf(Warn+"could not derive public key from private key sourced from %s", source)
-	}
-
-	fmt.Printf(Info+"Using the private key sourced from %s, the public key is:\n\n", source)
-	fmt.Printf("%s\n", publicKey.String())
-}
-
 func askForPassword() (string, error) {
 	var password string
 	err := survey.AskOne(&survey.Password{Message: "Private key password:"}, &password)
@@ -146,14 +131,6 @@ var signCmd = &cobra.Command{
 	Use:   "sign",
 	Short: "Package and index signing",
 	Long:  "",
-	Run: func(cmd *cobra.Command, args []string) {
-		password, err := extractSigningPasswordFromCmd(cmd)
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-		displayPublicKey(password)
-	},
 }
 
 func signPackageStandalone(packagePath string) error {
