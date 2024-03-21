@@ -55,9 +55,10 @@ type S3StorageProvider struct {
 }
 
 type S3StorageOptions struct {
-	Region     string `json:"region"`
-	BucketName string `json:"bucket"`
-	Directory  string `json:"directory"`
+	Region             string `json:"region"`
+	BucketName         string `json:"bucket"`
+	Directory          string `json:"directory"`
+	AutoRefreshEnabled bool   `json:"auto_refresh_enabled"`
 }
 
 // Decode errors from S3 into errors that storage providers emit
@@ -197,7 +198,7 @@ func (ssp *S3StorageProvider) listObjects(objectBasePath string) ([]string, erro
 	return objectKeys, nil
 }
 
-func (ssp *S3StorageProvider) New(options StorageOptions, createAsNeeded, refreshEnabled bool) error {
+func (ssp *S3StorageProvider) New(options StorageOptions, createAsNeeded bool) error {
 	s3Options, ok := options.(S3StorageOptions)
 	if !ok {
 		return errors.New("invalid options provided")
@@ -295,7 +296,7 @@ func (ssp *S3StorageProvider) New(options StorageOptions, createAsNeeded, refres
 	}
 
 	// Set up bucket monitoring
-	if !refreshEnabled {
+	if !s3Options.AutoRefreshEnabled {
 		ssp.refreshEnabled = false
 		return nil
 	}

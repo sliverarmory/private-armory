@@ -45,9 +45,8 @@ to be supplied by the caller.
 */
 type StorageProvider interface {
 	// New sets up a new instance of the storage provider with the options appropriate for that storage provider.
-	// The storage provider also accepts two booleans: the first determines whether directories are created as needed and
-	// the second determines whether to enable auto refreshing of the package index.
-	New(StorageOptions, bool, bool) error
+	// The storage provider also accepts a boolean: whether directories are created as needed
+	New(StorageOptions, bool) error
 	// Returns the name of the storage provider
 	Name() string
 	// Returns the options that the storager provider is configured with
@@ -192,4 +191,5 @@ func (sp *StoragePaths) Files() map[string]string {
 }
 
 // An empty interface for storage options. The exact implementation depends on the storage provider.
+// All storage providers should have an option for enabling auto-refresh.
 type StorageOptions interface{}

@@ -547,10 +547,11 @@ func initializeStorageProviderFromPath(path string, storageOptions map[string]st
 		}
 		storageProvider = &storage.S3StorageProvider{}
 		err = storageProvider.New(storage.S3StorageOptions{
-			BucketName: parsedPath.Host,
-			Directory:  bucketDir,
-			Region:     region,
-		}, true, autoRefreshEnabled)
+			BucketName:         parsedPath.Host,
+			Directory:          bucketDir,
+			Region:             region,
+			AutoRefreshEnabled: autoRefreshEnabled,
+		}, true)
 		if err != nil {
 			return nil, err
 		}
@@ -592,7 +593,10 @@ func initializeStorageProviderFromPath(path string, storageOptions map[string]st
 			localPath = path
 		}
 		storageProvider = &storage.LocalStorageProvider{}
-		err = storageProvider.New(storage.LocalStorageOptions{BasePath: localPath}, true, autoRefreshEnabled)
+		err = storageProvider.New(storage.LocalStorageOptions{
+			BasePath:           localPath,
+			AutoRefreshEnabled: autoRefreshEnabled,
+		}, true)
 		if err != nil {
 			return nil, err
 		}
@@ -724,18 +728,22 @@ func getStorageProvider(cmd *cobra.Command) (storage.StorageProvider, string, er
 
 		// The "host" is the bucket name
 		storageOptions := storage.S3StorageOptions{
-			BucketName: parsedDirPath.Host,
-			Directory:  bucketDir,
-			Region:     s3Region,
+			BucketName:         parsedDirPath.Host,
+			Directory:          bucketDir,
+			Region:             s3Region,
+			AutoRefreshEnabled: autoRefreshEnabled,
 		}
-		err = storageProvider.New(storageOptions, true, autoRefreshEnabled)
+		err = storageProvider.New(storageOptions, true)
 		if err != nil {
 			return nil, "", err
 		}
 	case "", "file":
 		storageProvider = &storage.LocalStorageProvider{}
-		storageOptions := storage.LocalStorageOptions{BasePath: parsedDirPath.Path}
-		err = storageProvider.New(storageOptions, true, autoRefreshEnabled)
+		storageOptions := storage.LocalStorageOptions{
+			BasePath:           parsedDirPath.Path,
+			AutoRefreshEnabled: autoRefreshEnabled,
+		}
+		err = storageProvider.New(storageOptions, true)
 		if err != nil {
 			return nil, "", err
 		}

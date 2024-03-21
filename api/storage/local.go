@@ -53,7 +53,8 @@ type LocalStorageProvider struct {
 }
 
 type LocalStorageOptions struct {
-	BasePath string `json:"path"`
+	BasePath           string `json:"path"`
+	AutoRefreshEnabled bool   `json:"auto_refresh_enabled"`
 }
 
 func checkAndCreateDirectory(name, path string, createAsNeeded bool) (bool, error) {
@@ -146,7 +147,7 @@ func (lsp *LocalStorageProvider) setUpPackageWatcher() {
 	}
 }
 
-func (lsp *LocalStorageProvider) New(options StorageOptions, createAsNeeded, refreshEnabled bool) error {
+func (lsp *LocalStorageProvider) New(options StorageOptions, createAsNeeded bool) error {
 	// Make sure the base path exists
 	localOptions, ok := options.(LocalStorageOptions)
 	if !ok {
@@ -214,7 +215,7 @@ func (lsp *LocalStorageProvider) New(options StorageOptions, createAsNeeded, ref
 	lsp.initialized = true
 
 	// Attempt to start package watcher / auto refresh
-	if refreshEnabled {
+	if localOptions.AutoRefreshEnabled {
 		lsp.refreshSetupErr = nil
 		lsp.refreshEventChannel = make(chan string)
 		lsp.refreshErrorChannel = make(chan error)
