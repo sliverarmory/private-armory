@@ -19,15 +19,16 @@ package signing
 */
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 
 	"aead.dev/minisign"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/secretsmanager"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/sliverarmory/external-armory/consts"
 )
 
@@ -80,11 +81,14 @@ func (asp *AWSSigningProvider) New(keyInfo SigningKeyInfo) error {
 		return errors.New("incorrect key information provided")
 	}
 
-	awsSession := session.Must(session.NewSession())
-	smSvc := secretsmanager.New(awsSession, aws.NewConfig().WithRegion(keyInfoAWS.Region))
+	smConfig, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(keyInfoAWS.Region))
+	if err != nil {
+		return fmt.Errorf("could not load AWS config: %s", err)
+	}
+	smClient := secretsmanager.NewFromConfig(smConfig)
 	secretInput := &secretsmanager.GetSecretValueInput{SecretId: aws.String(keyInfoAWS.Path)}
 
-	result, err := smSvc.GetSecretValue(secretInput)
+	result, err := smClient.GetSecretValue(context.TODO(), secretInput)
 	if err != nil {
 		return fmt.Errorf("could not get key from AWS Secrets Manager: %s", err)
 	}

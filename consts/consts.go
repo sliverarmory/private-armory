@@ -129,7 +129,7 @@ const (
 
 	// Should not be edited directly, so hide them
 	ArmoryIndexFileName    = ".armory-index.json"
-	ArmoryIndexSigFileName = ".armory-index.minsig"
+	ArmoryIndexSigFileName = ".armory-index.minisig"
 	SignaturesDirName      = ".armory-minisigs"
 
 	// Package types
