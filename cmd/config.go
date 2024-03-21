@@ -21,16 +21,12 @@ package cmd
 import (
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"time"
 
 	"github.com/sliverarmory/external-armory/api"
 	"github.com/sliverarmory/external-armory/api/signing"
-	"github.com/sliverarmory/external-armory/api/storage"
 	"github.com/sliverarmory/external-armory/consts"
 	"github.com/spf13/cobra"
 )
@@ -113,45 +109,6 @@ func checkForCmdSigningProvider(cmd *cobra.Command) error {
 	return nil
 }
 
-func getConfigDataFromStorageProvider(storageProvider storage.StorageProvider, configPath string) error {
-	if storageProvider == nil {
-		return ErrStorageProviderNotInitialized
-	}
-
-	if configPath != "" {
-		parsedPath, err := url.Parse(configPath)
-		if err != nil {
-			return fmt.Errorf("could not parse config path: %s", err)
-		}
-
-		runningServerConfig.StorageProvider.SetConfigPath(parsedPath.Path)
-	}
-
-	configuredPaths, err := runningServerConfig.StorageProvider.Paths()
-	if err != nil {
-		return ErrServerNotInitialized
-	}
-
-	configData, err := runningServerConfig.StorageProvider.ReadConfig()
-	if err != nil {
-		if errors.Is(err, storage.ErrDoesNotExist) {
-			fmt.Printf(Warn+"Config file %s does not exist\n", configuredPaths.Config)
-		} else {
-			fmt.Printf("Error reading config file %s, %s\n", configuredPaths.Config, err)
-		}
-		// Could not read a config file on disk for whatever reason, so we will use defaults and let CLI args override
-		fmt.Println("Using default configuration and allowing command arguments to override")
-	} else {
-		err = json.Unmarshal(configData, runningServerConfig)
-		if err != nil {
-			// Something was wrong with the config file, the user will have to fix it or re-run setup
-			return fmt.Errorf("error parsing config file %s, %s", configuredPaths.Config, err)
-		}
-	}
-
-	return nil
-}
-
 func getServerConfig(cmd *cobra.Command) error {
 	// We only need to pull configuration information if we do not currently have a config
 	if runningServerConfig != nil {
@@ -174,18 +131,9 @@ func getServerConfig(cmd *cobra.Command) error {
 		SigningKeyProviderDetails:      nil,
 	}
 
-	storageProvider, configPath, err := getStorageProvider(cmd)
+	err = initializeServerFromStorage(cmd)
 	if err != nil {
 		return fmt.Errorf("could not determine root directory and start the server: %s", err)
-	}
-
-	runningServerConfig.StorageProvider = storageProvider
-	runningServerConfig.StorageProviderName = storageProvider.Name()
-	runningServerConfig.StorageProviderDetails = storageProvider.Options()
-
-	err = getConfigDataFromStorageProvider(storageProvider, configPath)
-	if err != nil {
-		return err
 	}
 
 	// We need to check some CLI arguments in case setup needs to be run
@@ -263,10 +211,16 @@ func getServerConfig(cmd *cobra.Command) error {
 		flagsChanged = append(flagsChanged, consts.WriteTimeoutFlagStr)
 	}
 
+	// Get signing key password
+	password, err := extractSigningPasswordFromCmdOrEnv(cmd)
+	if err != nil {
+		return err
+	}
+
 	// At this point, we should know where the root dir is
 	// If the necessary directories are not setup, then we need to run setup
 	if runningServerConfig.StorageProvider.IsNew() {
-		err = runSetup(flagsChanged)
+		err = runSetup(flagsChanged, password)
 		if err != nil {
 			// Remove the directories we created
 			folderErr := runningServerConfig.StorageProvider.Destroy()
@@ -279,7 +233,7 @@ func getServerConfig(cmd *cobra.Command) error {
 		return err
 	} else {
 		// This armory has been setup before, so we need to get the signing key
-		getAndStoreSigningKey()
+		getAndStoreSigningKey(password)
 		if runningServerConfig.TLSEnabled {
 			// Make sure we have the certificates set up properly if we are going to enable TLS
 			// If it fails, make sure to update the config

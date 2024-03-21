@@ -26,62 +26,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	"aead.dev/minisign"
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/sirupsen/logrus"
-	"github.com/sliverarmory/external-armory/api"
 	"github.com/sliverarmory/external-armory/api/patterns"
-	"github.com/sliverarmory/external-armory/api/signing"
 	"github.com/sliverarmory/external-armory/consts"
 	"github.com/sliverarmory/external-armory/log"
 	"github.com/sliverarmory/external-armory/util"
 	"github.com/spf13/cobra"
 )
-
-func getSigningKey(password string) (*minisign.PrivateKey, string, error) {
-	// The signing key can be provided through an environment variable or a file whose path is provided via the config file
-	if runningServerConfig == nil {
-		return nil, "all sources", ErrServerNotInitialized
-	}
-
-	var signingKeyData []byte
-	var err error
-	var privateKey minisign.PrivateKey
-	var source string
-
-	// Environment variable overrides config file
-	signingKeyDataEnv, signingKeySet := os.LookupEnv(consts.SigningKeyEnvVar)
-
-	if signingKeySet {
-		source = fmt.Sprintf("environment variable %s", consts.SigningKeyEnvVar)
-		signingKeyData = []byte(signingKeyDataEnv)
-	} else {
-		// Use the key from the config file
-		source = "file from storage provider"
-		signingKeyData, err = runningServerConfig.StorageProvider.ReadPackageSigningKey()
-		if err != nil {
-			return nil, source, err
-		}
-	}
-
-	if len(signingKeyData) == 0 {
-		return nil, "all sources", errors.New("signing key not provided")
-	}
-
-	if password == "" {
-		// If the password from the command line was blank, the password may be in the environment variable
-		// We can simply get the value because if the password is not defined in the environment, we will overwrite it with blank
-		// which is fine because it is already blank
-		password = os.Getenv(consts.SigningKeyPasswordEnvVar)
-	}
-
-	privateKey, err = minisign.DecryptKey(password, signingKeyData)
-	if err != nil {
-		return nil, source, fmt.Errorf("could not decrypt private key: %s", err)
-	}
-
-	return &privateKey, source, nil
-}
 
 func askForPassword() (string, error) {
 	var password string
@@ -103,7 +55,9 @@ func getPasswordFromFile(path string) (string, error) {
 	return string(passwordFromFile), nil
 }
 
-func extractSigningPasswordFromCmd(cmd *cobra.Command) (password string, err error) {
+func extractSigningPasswordFromCmdOrEnv(cmd *cobra.Command) (password string, err error) {
+	password = ""
+
 	promptPassword, err := cmd.Flags().GetBool(consts.PasswordFlagStr)
 	if err != nil {
 		err = fmt.Errorf(Warn+"could not parse flag --%s: %s", consts.PasswordFlagStr, err)
@@ -123,6 +77,14 @@ func extractSigningPasswordFromCmd(cmd *cobra.Command) (password string, err err
 		if err != nil {
 			err = fmt.Errorf(Warn+"could not retrieve password from file %q: %s", passwordFilePath, err)
 		}
+	} else {
+		armoryPasswordEnv, passwordEnvSet := os.LookupEnv(consts.SigningKeyPasswordEnvVar)
+		if passwordEnvSet {
+			password = strings.Trim(armoryPasswordEnv, "\"")
+			err = nil
+			return
+		}
+		// Then the password is blank, so return
 	}
 	return
 }
@@ -226,38 +188,40 @@ func signPackageStandalone(packagePath string) error {
 }
 
 func getCommonInfoForSigningCmds(cmd *cobra.Command) (err error) {
-	storageProvider, configPath, err := getStorageProvider(cmd)
+	err = initializeServerFromStorage(cmd)
 	if err != nil {
 		return
 	}
 
-	runningServerConfig = &api.ArmoryServerConfig{
-		StorageProvider: storageProvider,
-	}
-
-	err = getConfigDataFromStorageProvider(storageProvider, configPath)
+	password, err := extractSigningPasswordFromCmdOrEnv(cmd)
 	if err != nil {
 		return
 	}
 
-	password, err := extractSigningPasswordFromCmd(cmd)
-	if err != nil {
-		return
+	if runningServerConfig.StorageProviderName == consts.SigningKeyProviderExternal {
+		// If the configuration specifies an external key, we need to get the path to a key from the user
+	} else {
+		err = getAndStoreSigningKey(password)
+		if err != nil {
+			err = fmt.Errorf(Warn+"could not get signing key from provider: %s", err)
+		}
 	}
-	signingKey, source, err := getSigningKey(password)
-	if err != nil {
-		err = fmt.Errorf(Warn+"could not get signing key from source %s: %s", source, err)
-		return
-	}
+	/*
+		signingKey, source, err := getSigningKey(password)
+		if err != nil {
+			err = fmt.Errorf(Warn+"could not get signing key from source %s: %s", source, err)
+			return
+		}
 
-	// Create a local signing provider and inject the key
-	provider := signing.LocalSigningProvider{}
-	provider.SetPrivateKey(signingKey)
 
-	// Assign the provider to the current config
-	runningServerConfig.SigningKeyProvider = &provider
-	runningServerConfig.SigningKeyProviderName = consts.SigningKeyProviderLocal
+		// Create a local signing provider and inject the key
+		provider := signing.LocalSigningProvider{}
+		provider.SetPrivateKey(signingKey)
 
+		// Assign the provider to the current config
+		runningServerConfig.SigningKeyProvider = &provider
+		runningServerConfig.SigningKeyProviderName = consts.SigningKeyProviderLocal
+	*/
 	return
 }
 

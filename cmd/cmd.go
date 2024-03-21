@@ -130,11 +130,14 @@ func init() {
 	rootCmd.Flags().StringP(consts.RootDirFlagStr, "d", "", "Root armory directory (must be writable)")
 	rootCmd.MarkFlagDirname(consts.RootDirFlagStr)
 
-	genSignatureCmd.Flags().StringP(consts.FileFlagStr, "f", "", "Path to output key")
-	genSignatureCmd.Flags().BoolP(consts.PasswordFlagStr, "p", false, "Prompt for password for generated key")
+	rootCmd.PersistentFlags().BoolP(consts.PasswordFlagStr, "P", false, "Prompt for password for the signing key")
+	rootCmd.PersistentFlags().StringP(consts.PasswordFileFlagStr, "a", "", "Path to a file containing the password")
 
-	signCmd.PersistentFlags().BoolP(consts.PasswordFlagStr, "p", false, "Prompt for password for the signing key")
-	signCmd.PersistentFlags().StringP(consts.PasswordFileFlagStr, "a", "", "Path to a file containing the password")
+	genSignatureCmd.Flags().StringP(consts.FileFlagStr, "f", "", "Path to output key")
+	//genSignatureCmd.Flags().BoolP(consts.PasswordFlagStr, "p", false, "Prompt for password for generated key")
+
+	//signCmd.PersistentFlags().BoolP(consts.PasswordFlagStr, "p", false, "Prompt for password for the signing key")
+	//signCmd.PersistentFlags().StringP(consts.PasswordFileFlagStr, "a", "", "Path to a file containing the password")
 
 	signPackageCmd.Flags().StringP(consts.ConfigFlagStr, "c", "", "Path to a configuration file for the armory (required)")
 	signPackageCmd.Flags().StringP(consts.FileFlagStr, "f", "", "Path to the package to sign (required)")

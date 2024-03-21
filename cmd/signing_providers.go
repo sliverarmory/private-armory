@@ -32,17 +32,13 @@ import (
 /*
 Local
 */
-func setupLocalKeyProvider() error {
+func setupLocalKeyProvider(password string) error {
 	if runningServerConfig == nil {
 		return ErrServerNotInitialized
 	}
-	password, err := getUserSigningKeyPassword()
-	if err != nil {
-		return fmt.Errorf("could not get signing key password: %s", err)
-	}
 
 	provider := &signing.LocalSigningProvider{}
-	err = provider.New(&signing.LocalSigningKeyInfo{
+	err := provider.New(&signing.LocalSigningKeyInfo{
 		Password:        password,
 		StorageProvider: runningServerConfig.StorageProvider,
 	})
