@@ -103,23 +103,23 @@ func init() {
 	rootCmd.Flags().StringP(consts.WriteTimeoutFlagStr, "W", "1m", "HTTP write timeout expressed as a duration")
 	rootCmd.Flags().BoolP(consts.RefreshFlagStr, "r", false, "Force refresh of armory index (may require password input)")
 
-	rootCmd.Flags().StringP(consts.StorageProviderNameFlagStr,
+	rootCmd.PersistentFlags().StringP(consts.StorageProviderNameFlagStr,
 		"s",
 		"",
 		fmt.Sprintf("Storage provider name (supported providers: %s)", supportedStorageProviders()),
 	)
-	rootCmd.Flags().StringToStringP(consts.StorageProviderOptionsFlagStr,
+	rootCmd.PersistentFlags().StringToStringP(consts.StorageProviderOptionsFlagStr,
 		"o",
 		nil,
 		"Options for the storage provider specified as KEY1=VALUE1,KEY2=VALUE2...",
 	)
 
-	rootCmd.Flags().StringP(consts.SigningProviderNameFlagStr,
+	rootCmd.PersistentFlags().StringP(consts.SigningProviderNameFlagStr,
 		"g",
 		"",
 		fmt.Sprintf("Signing provider name (supported providers: %s)", supportedSigningProviders()),
 	)
-	rootCmd.Flags().StringToStringP(consts.SigningProviderOptionsFlagStr,
+	rootCmd.PersistentFlags().StringToStringP(consts.SigningProviderOptionsFlagStr,
 		"n",
 		nil,
 		"Options for the signing key provider specified as KEY1=VALUE1,KEY2=VALUE2...",
@@ -134,29 +134,15 @@ func init() {
 	rootCmd.PersistentFlags().StringP(consts.PasswordFileFlagStr, "a", "", "Path to a file containing the password")
 
 	genSignatureCmd.Flags().StringP(consts.FileFlagStr, "f", "", "Path to output key")
-	//genSignatureCmd.Flags().BoolP(consts.PasswordFlagStr, "p", false, "Prompt for password for generated key")
-
-	//signCmd.PersistentFlags().BoolP(consts.PasswordFlagStr, "p", false, "Prompt for password for the signing key")
-	//signCmd.PersistentFlags().StringP(consts.PasswordFileFlagStr, "a", "", "Path to a file containing the password")
 
 	signPackageCmd.Flags().StringP(consts.ConfigFlagStr, "c", "", "Path to a configuration file for the armory (required)")
 	signPackageCmd.Flags().StringP(consts.FileFlagStr, "f", "", "Path to the package to sign (required)")
-	signPackageCmd.Flags().StringToStringP(consts.StorageProviderOptionsFlagStr,
-		"o",
-		nil,
-		"Options for the storage provider specified as KEY1=VALUE1,KEY2=VALUE2...",
-	)
 	signPackageCmd.MarkFlagFilename(consts.ConfigFlagStr, "json")
 	signPackageCmd.MarkFlagRequired(consts.ConfigFlagStr)
 	signPackageCmd.MarkFlagFilename(consts.FileFlagStr, "tar.gz")
 	signPackageCmd.MarkFlagRequired(consts.FileFlagStr)
 
 	signIndexCmd.Flags().StringP(consts.ConfigFlagStr, "c", "", "Path to a configuration file for the armory (required)")
-	signIndexCmd.Flags().StringToStringP(consts.StorageProviderOptionsFlagStr,
-		"o",
-		nil,
-		"Options for the storage provider specified as KEY1=VALUE1,KEY2=VALUE2...",
-	)
 	signIndexCmd.MarkFlagFilename(consts.ConfigFileName, "json")
 	signIndexCmd.MarkFlagRequired(consts.ConfigFlagStr)
 
@@ -165,13 +151,6 @@ func init() {
 
 	refreshCmd.Flags().StringP(consts.ConfigFlagStr, "c", "", "Config file path")
 	refreshCmd.MarkFlagFilename(consts.ConfigFlagStr, "json")
-	refreshCmd.Flags().BoolP(consts.PasswordFlagStr, "p", false, "Prompt for password for the signing key")
-	refreshCmd.Flags().StringP(consts.PasswordFileFlagStr, "a", "", "Path to a file containing the password")
-	refreshCmd.Flags().StringToStringP(consts.StorageProviderOptionsFlagStr,
-		"o",
-		nil,
-		"Options for the storage provider specified as KEY1=VALUE1,KEY2=VALUE2...",
-	)
 	rootCmd.AddCommand(refreshCmd)
 	rootCmd.AddCommand(genSignatureCmd)
 	rootCmd.AddCommand(signCmd)

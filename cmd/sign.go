@@ -187,6 +187,37 @@ func signPackageStandalone(packagePath string) error {
 	return nil
 }
 
+func getSigningProviderFromCmd(cmd *cobra.Command) error {
+	cannotSetExternal := errors.New("you must specify a signing key provider other than external")
+
+	// Check the command line to see if a provider was set
+	err := checkForCmdSigningProvider(cmd)
+	if err != nil {
+		return err
+	} else if runningServerConfig.SigningKeyProviderName == consts.SigningKeyProviderExternal {
+		// a nil error could mean that the flags were not set or the name was set to external
+		return cannotSetExternal
+	} else if runningServerConfig.SigningKeyProviderName != "" {
+		// Then we got a signing provider other than external that was not blank
+		fmt.Printf(Info+"Using %s signing provider\n", runningServerConfig.SigningKeyProviderName)
+		return nil
+	}
+
+	// If we did not get a provider from the command line
+	// Check to see if the provider was passed in as an environment variable
+	signingKeyProviderEnv, signingKeyProviderSet := os.LookupEnv(consts.SigningKeyProviderEnvVar)
+	if signingKeyProviderSet {
+		if signingKeyProviderEnv == consts.SigningKeyProviderExternal {
+			return cannotSetExternal
+		}
+		runningServerConfig.SigningKeyProviderName = signingKeyProviderEnv
+		fmt.Printf(Info+"Using %s signing provider\n", runningServerConfig.SigningKeyProviderName)
+		return nil
+	}
+
+	return errors.New("signing provider not set from the command line or environment")
+}
+
 func getCommonInfoForSigningCmds(cmd *cobra.Command) (err error) {
 	err = initializeServerFromStorage(cmd)
 	if err != nil {
@@ -198,30 +229,19 @@ func getCommonInfoForSigningCmds(cmd *cobra.Command) (err error) {
 		return
 	}
 
-	if runningServerConfig.StorageProviderName == consts.SigningKeyProviderExternal {
-		// If the configuration specifies an external key, we need to get the path to a key from the user
-	} else {
-		err = getAndStoreSigningKey(password)
+	if runningServerConfig.SigningKeyProviderName == consts.SigningKeyProviderExternal {
+		// If the configuration specifies an external key, we need to get an alternate signing provider
+		fmt.Println(Info + "The configuration specifies an external signing key provider.")
+		err = getSigningProviderFromCmd(cmd)
 		if err != nil {
-			err = fmt.Errorf(Warn+"could not get signing key from provider: %s", err)
+			return err
 		}
 	}
-	/*
-		signingKey, source, err := getSigningKey(password)
-		if err != nil {
-			err = fmt.Errorf(Warn+"could not get signing key from source %s: %s", source, err)
-			return
-		}
-
-
-		// Create a local signing provider and inject the key
-		provider := signing.LocalSigningProvider{}
-		provider.SetPrivateKey(signingKey)
-
-		// Assign the provider to the current config
-		runningServerConfig.SigningKeyProvider = &provider
-		runningServerConfig.SigningKeyProviderName = consts.SigningKeyProviderLocal
-	*/
+	fmt.Println(Info + "Retrieving signing key from signing provider")
+	err = getAndStoreSigningKey(password)
+	if err != nil {
+		err = fmt.Errorf(Warn+"could not get signing key from provider: %s", err)
+	}
 	return
 }
 
@@ -242,12 +262,12 @@ var signPackageCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		packagePath, err := getInfoForPackageSigningCmd(cmd)
 		if err != nil {
-			fmt.Println(err)
+			fmt.Println(Warn + err.Error())
 			return
 		}
 		appLogFile, err := runningServerConfig.StorageProvider.GetLogger(consts.AppLogName)
 		if err != nil {
-			fmt.Println(err)
+			fmt.Println(Warn + err.Error())
 			return
 		}
 		// Closing the logger is taken care of when this function returns to cmd.Execute()

@@ -102,7 +102,7 @@ func (vsp *VaultSigningProvider) New(keyInfo SigningKeyInfo) error {
 	var err error
 
 	vsp.initialized = false
-	vsp.name = consts.SigningKeyProviderAWS
+	vsp.name = consts.SigningKeyProviderVault
 
 	keyInfoVault, ok := keyInfo.(*VaultSigningKeyInfo)
 	if !ok {

@@ -23,6 +23,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/sliverarmory/external-armory/api"
@@ -59,6 +60,14 @@ func parseSigningProviderOptions(signingProviderName string, signingProviderOpti
 	case consts.SigningKeyProviderLocal:
 		localConfigDetails := signing.LocalSigningKeyInfo{}
 		localConfigDetails.Password = signingProviderOptions[consts.LocalKeyPasswordKey]
+		localConfigDetails.FileName = signingProviderOptions[consts.LocalKeyFileNameKey]
+		localConfigDetails.CopyToStorage = false
+		if copyValue, ok := signingProviderOptions[consts.LocalCopyKeyKey]; ok {
+			copyValue = strings.ToLower(copyValue)
+			if copyValue == "yes" || copyValue == "true" {
+				localConfigDetails.CopyToStorage = true
+			}
+		}
 		return &localConfigDetails, nil
 	case consts.SigningKeyProviderVault:
 		vaultConfigDetails := signing.VaultSigningKeyInfo{}

@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 
 	"aead.dev/minisign"
 	"github.com/sliverarmory/external-armory/api/storage"
@@ -45,6 +46,8 @@ type LocalSigningProvider struct {
 type LocalSigningKeyInfo struct {
 	Password        string
 	StorageProvider storage.StorageProvider
+	FileName        string
+	CopyToStorage   bool
 }
 
 func (lski *LocalSigningKeyInfo) UnmarshalJSON(b []byte) error {
@@ -62,6 +65,7 @@ func (lski *LocalSigningKeyInfo) UnmarshalJSON(b []byte) error {
 
 func (lski *LocalSigningKeyInfo) MarshalJSON() ([]byte, error) {
 	// The password is not going to go into the JSON object
+	// File name and copy to storage are ephemeral
 	return json.Marshal([]byte{})
 }
 
@@ -84,17 +88,7 @@ func (lsp *LocalSigningProvider) generateAndStoreKey(password string) error {
 	return nil
 }
 
-func (lsp *LocalSigningProvider) New(keyInfo SigningKeyInfo) error {
-	lsp.initialized = false
-	lsp.name = consts.SigningKeyProviderLocal
-
-	keyInfoLocal, ok := keyInfo.(*LocalSigningKeyInfo)
-	if !ok {
-		return errors.New("incorrect key information provided")
-	}
-
-	lsp.storageProvider = keyInfoLocal.StorageProvider
-
+func (lsp *LocalSigningProvider) readKeyFromStorageProvider(password string) error {
 	key, err := lsp.storageProvider.ReadPackageSigningKey()
 
 	if err != nil {
@@ -102,7 +96,7 @@ func (lsp *LocalSigningProvider) New(keyInfo SigningKeyInfo) error {
 			return fmt.Errorf("could not get key from storage provider: %s", err)
 		} else {
 			// Create the key
-			err = lsp.generateAndStoreKey(keyInfoLocal.Password)
+			err = lsp.generateAndStoreKey(password)
 			if err != nil {
 				return err
 			}
@@ -113,9 +107,64 @@ func (lsp *LocalSigningProvider) New(keyInfo SigningKeyInfo) error {
 			return errors.New("key is empty and needs to be regenerated")
 		}
 
-		lsp.privateKey, err = minisign.DecryptKey(keyInfoLocal.Password, key)
+		lsp.privateKey, err = minisign.DecryptKey(password, key)
 		if err != nil {
 			return fmt.Errorf("could not decrypt private key with provided password: %s", err)
+		}
+	}
+	return nil
+}
+
+func (lsp *LocalSigningProvider) readKeyFromLocalFileSystem(path, password string, copyToStorage bool) error {
+	if path == "" {
+		return errors.New("blank path provided")
+	}
+
+	keyData, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("could not read key from %q: %s", path, err)
+	}
+
+	if len(keyData) == 0 {
+		return errors.New("key is empty and needs to be regenerated")
+	}
+
+	lsp.privateKey, err = minisign.DecryptKey(password, keyData)
+	if err != nil {
+		return fmt.Errorf("could not decrypt private key with provided password: %s", err)
+	}
+
+	if copyToStorage {
+		if lsp.storageProvider == nil {
+			return errors.New("cannot copy signing key to storage provider because the storage provider is not initialized")
+		}
+		err = lsp.storageProvider.WritePackageSigningKey(keyData)
+		if err != nil {
+			return fmt.Errorf("could not write signing key to provider: %s", err)
+		}
+	}
+	return nil
+}
+
+func (lsp *LocalSigningProvider) New(keyInfo SigningKeyInfo) error {
+	lsp.initialized = false
+	lsp.name = consts.SigningKeyProviderLocal
+
+	keyInfoLocal, ok := keyInfo.(*LocalSigningKeyInfo)
+	if !ok {
+		return errors.New("incorrect key information provided")
+	}
+
+	lsp.storageProvider = keyInfoLocal.StorageProvider
+	if keyInfoLocal.FileName != "" {
+		err := lsp.readKeyFromLocalFileSystem(keyInfoLocal.FileName, keyInfoLocal.Password, keyInfoLocal.CopyToStorage)
+		if err != nil {
+			return err
+		}
+	} else {
+		err := lsp.readKeyFromStorageProvider(keyInfoLocal.Password)
+		if err != nil {
+			return err
 		}
 	}
 
@@ -163,4 +212,16 @@ func (lsp *LocalSigningProvider) SetPrivateKey(key *minisign.PrivateKey) {
 	lsp.privateKey = *key
 	lsp.initialized = true
 	lsp.name = consts.SigningKeyProviderLocal
+}
+
+func (lsp *LocalSigningProvider) SetPrivateKeyFromBytes(keyData []byte, password string) error {
+	var err error
+
+	lsp.privateKey, err = minisign.DecryptKey(password, keyData)
+	if err != nil {
+		return fmt.Errorf("could not decrypt private key: %s", err)
+	}
+	lsp.initialized = true
+	lsp.name = consts.SigningKeyProviderLocal
+	return nil
 }

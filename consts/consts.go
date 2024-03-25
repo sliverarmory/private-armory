@@ -108,6 +108,8 @@ const (
 	AWSRegionKey            = "region"
 	ExternalPublicKeyKey    = "public-key"
 	LocalKeyPasswordKey     = "password"
+	LocalKeyFileNameKey     = "file"
+	LocalCopyKeyKey         = "copy"
 	VaultAddrKey            = "addr"
 	VaultAppRolePathKey     = "app-role-path"
 	VaultAppRoleIDKey       = "roleID"
