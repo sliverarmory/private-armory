@@ -623,8 +623,33 @@ func initializeServerFromConfig(path string, storageOptions map[string]string, f
 	return nil
 }
 
-func parseStorageProviderOptions(providerName string, providerOptions map[string]string) (string, storage.StorageOptions, error) {
-	var rootDir string
+func deriveProviderFromRootDir(rootDir string) (string, error) {
+	parsedRootDir, err := url.Parse(rootDir)
+	if err != nil {
+		return "", fmt.Errorf("could not parse supplied root directory: %s", err)
+	}
+
+	switch parsedRootDir.Scheme {
+	case consts.AWSS3StorageProviderStr:
+		return consts.AWSS3StorageProviderStr, nil
+	case "", "file":
+		return consts.LocalStorageProviderStr, nil
+	default:
+		return "", fmt.Errorf("unsupported storage provider %q for root directory", parsedRootDir.Scheme)
+	}
+}
+
+func parseStorageProviderOptions(rootDir, providerName string, providerOptions map[string]string) (string, storage.StorageOptions, error) {
+	var rootDirDerived string
+
+	if providerName == "" {
+		// Try to derive the provider name from the supplied root dir (if one was supplied)
+		rootDirProvider, err := deriveProviderFromRootDir(rootDir)
+		if err != nil {
+			return "", nil, err
+		}
+		providerName = rootDirProvider
+	}
 
 	switch providerName {
 	case consts.AWSS3StorageProviderStr:
@@ -634,23 +659,54 @@ func parseStorageProviderOptions(providerName string, providerOptions map[string
 		options.Directory = providerOptions[consts.AWSS3BucketDirectoryOptionStr]
 		if options.BucketName != "" {
 			if options.Directory != "" {
-				rootDir = fmt.Sprintf("s3://%s/%s/", options.BucketName, options.Directory)
+				rootDirDerived = fmt.Sprintf("s3://%s/%s/", options.BucketName, options.Directory)
 			} else {
-				rootDir = fmt.Sprintf("s3://%s", options.BucketName)
+				rootDirDerived = fmt.Sprintf("s3://%s", options.BucketName)
 			}
 		}
-		return rootDir, options, nil
+		if rootDirDerived == "" && rootDir != "" {
+			rootDirDerived = rootDir
+		}
+		return rootDirDerived, options, nil
 	case consts.LocalStorageProviderStr:
 		options := storage.LocalStorageOptions{}
 		options.BasePath = providerOptions[consts.LocalStoragePathOptionStr]
-		rootDir = options.BasePath
-		return rootDir, options, nil
+		rootDirDerived = options.BasePath
+		if rootDirDerived == "" && rootDir != "" {
+			rootDirDerived = rootDir
+		}
+		return rootDirDerived, options, nil
 	case "":
 		// If the provider name is not given to us, then it will have to be figured out later
 		return rootDir, nil, nil
 	default:
-		return rootDir, nil, fmt.Errorf("unsupported storage provider %q", providerName)
+		return rootDirDerived, nil, fmt.Errorf("unsupported storage provider %q", providerName)
 	}
+}
+
+func checkRootDirProviderConsistency(rootDir, providerName string) error {
+	if rootDir == "" || providerName == "" {
+		return nil
+	}
+
+	rootDirProvider, err := deriveProviderFromRootDir(rootDir)
+	if err != nil {
+		return err
+	}
+
+	switch rootDirProvider {
+	case consts.AWSS3StorageProviderStr:
+		// If the root directory is an S3 bucket, then provider name should match
+		if providerName != consts.AWSS3StorageProviderStr {
+			return fmt.Errorf("an S3 root directory was provided, so \"s3\" was the expected storage provider, got %q instead", providerName)
+		}
+	case "", "file":
+		if providerName != consts.LocalStorageProviderStr {
+			return fmt.Errorf("a local directory path was provided, so \"local\" was the expected storage provider, got %q instead", providerName)
+		}
+	}
+
+	return nil
 }
 
 func initializeServerFromStorage(cmd *cobra.Command) error {
@@ -683,31 +739,35 @@ func initializeServerFromStorage(cmd *cobra.Command) error {
 	}
 	storageProviderName = strings.ToLower(storageProviderName)
 
-	// We may be able to derive the root dir from the provided storage options, so check that first
-	rootDir, storageOptions, err := parseStorageProviderOptions(storageProviderName, storageProviderOptions)
+	rootDir, _ := cmd.Flags().GetString(consts.RootDirFlagStr)
+	// We can skip the err because an error should only happen if the cmd does not have a root-dir flag,
+	// so unless a config has been specified, assume the default root dir
+	// The only command that calls this function and does not have a root-dir flag is refresh, and if the user wants to refresh an index
+	// that does not live in the default root dir, they should be passing a config file
+	// If there was an error, rootDir will still be empty
+	if rootDir == "" {
+		// Try to get the root dir from the environment
+		rootDirEnv, rootDirEnvSet := os.LookupEnv(consts.RootDirEnvVar)
+		if rootDirEnvSet {
+			rootDir = rootDirEnv
+		} else {
+			rootDir, err = getDefaultLocalRootDir()
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	// Make sure the root directory, if supplied, makes sense for the storage provider requested, if supplied
+	err = checkRootDirProviderConsistency(rootDir, storageProviderName)
 	if err != nil {
 		return err
 	}
 
-	if rootDir == "" {
-		rootDir, _ = cmd.Flags().GetString(consts.RootDirFlagStr)
-		// We can skip the err because an error should only happen if the cmd does not have a root-dir flag,
-		// so unless a config has been specified, assume the default root dir
-		// The only command that calls this function and does not have a root-dir flag is refresh, and if the user wants to refresh an index
-		// that does not live in the default root dir, they should be passing a config file
-		// If there was an error, rootDir will still be empty
-		if rootDir == "" {
-			// Try to get the root dir from the environment
-			rootDirEnv, rootDirEnvSet := os.LookupEnv(consts.RootDirEnvVar)
-			if rootDirEnvSet {
-				rootDir = rootDirEnv
-			} else {
-				rootDir, err = getDefaultLocalRootDir()
-				if err != nil {
-					return err
-				}
-			}
-		}
+	// We may be able to derive the root dir from the provided storage options, so check that first
+	rootDir, storageOptions, err := parseStorageProviderOptions(rootDir, storageProviderName, storageProviderOptions)
+	if err != nil {
+		return err
 	}
 
 	// Refreshing is enabled unless there has been an option supplied to turn it off
@@ -719,6 +779,7 @@ func initializeServerFromStorage(cmd *cobra.Command) error {
 	}
 
 	// Determine what type of provider to set up based on the path passed in
+	// We need more than the scheme, so we will parse it here
 	parsedDirPath, err := url.Parse(rootDir)
 	if err != nil {
 		return fmt.Errorf("could not parse root directory path: %s", err)
