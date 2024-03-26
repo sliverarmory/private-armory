@@ -219,6 +219,9 @@ func getSigningProviderFromCmd(cmd *cobra.Command) error {
 }
 
 func getCommonInfoForSigningCmds(cmd *cobra.Command) (err error) {
+	var providerWasExternal bool
+	var expectedPublicKey string
+
 	err = initializeServerFromStorage(cmd)
 	if err != nil {
 		return
@@ -232,15 +235,32 @@ func getCommonInfoForSigningCmds(cmd *cobra.Command) (err error) {
 	if runningServerConfig.SigningKeyProviderName == consts.SigningKeyProviderExternal {
 		// If the configuration specifies an external key, we need to get an alternate signing provider
 		fmt.Println(Info + "The configuration specifies an external signing key provider.")
+		expectedPublicKey = runningServerConfig.PublicKey
 		err = getSigningProviderFromCmd(cmd)
 		if err != nil {
 			return err
 		}
+		providerWasExternal = true
 	}
 	fmt.Println(Info + "Retrieving signing key from signing provider")
 	err = getAndStoreSigningKey(password)
 	if err != nil {
 		err = fmt.Errorf(Warn+"could not get signing key from provider: %s", err)
+		return
+	}
+	// If the configured signing provider was external, sanity check to make sure that the retrieved signing key
+	// matches what we expect it to be
+	if providerWasExternal {
+		var publicKey string
+		publicKey, err = runningServerConfig.SigningKeyProvider.PublicKey()
+		if err != nil {
+			err = fmt.Errorf("could not verify public key from provider: %s", err)
+			return
+		}
+		if expectedPublicKey != publicKey {
+			err = fmt.Errorf("signing key from provider does not match configured signing key")
+			return
+		}
 	}
 	return
 }

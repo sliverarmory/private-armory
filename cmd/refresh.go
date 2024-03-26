@@ -37,7 +37,7 @@ func invokeRefreshIndex(cmd *cobra.Command) {
 	fmt.Printf(Info + "Refreshing armory index ...\n")
 	err := getCommonInfoForSigningCmds(cmd)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Println(Warn + "Refresh operation failed: " + err.Error())
 		return
 	}
 	appLogFile, err := runningServerConfig.StorageProvider.GetLogger(consts.AppLogName)
