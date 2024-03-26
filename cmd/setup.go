@@ -888,7 +888,7 @@ func initializeServerFromStorage(cmd *cobra.Command) error {
 		}
 		if runningServerConfig.SigningKeyProviderName == consts.SigningKeyProviderExternal {
 			// Turn off auto refresh because we cannot sign the index
-			err = runningServerConfig.StorageProvider.StopAutoRefresh()
+			err = runningServerConfig.StorageProvider.StopAutoRefresh(true)
 			if err != nil {
 				return fmt.Errorf("needed to stop auto refresh but encountered an error: %s", err)
 			}

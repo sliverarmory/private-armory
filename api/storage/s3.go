@@ -382,13 +382,16 @@ func (ssp *S3StorageProvider) AutoRefreshChannels() (chan string, chan error, er
 	return watcherEvents, watcherErrors, nil
 }
 
-func (ssp *S3StorageProvider) StopAutoRefresh() error {
+func (ssp *S3StorageProvider) StopAutoRefresh(commitToOptions bool) error {
 	if !ssp.initialized || !ssp.refreshEnabled {
 		return nil
 	}
 
 	ssp.watcher.Close()
 	ssp.refreshEnabled = false
+	if commitToOptions {
+		ssp.options.AutoRefreshEnabled = false
+	}
 	return nil
 }
 

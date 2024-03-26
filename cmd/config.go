@@ -243,7 +243,7 @@ func getServerConfig(cmd *cobra.Command) error {
 		// When we first started, we did not know what the signing provider was. If the signing provider is external,
 		// we need to disable auto refresh for the storage provider.
 		if runningServerConfig.SigningKeyProviderName == consts.SigningKeyProviderExternal {
-			err = runningServerConfig.StorageProvider.StopAutoRefresh()
+			err = runningServerConfig.StorageProvider.StopAutoRefresh(true)
 			if err != nil {
 				return err
 			}

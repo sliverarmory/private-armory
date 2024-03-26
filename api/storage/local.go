@@ -263,12 +263,15 @@ func (lsp *LocalStorageProvider) AutoRefreshChannels() (chan string, chan error,
 	return lsp.refreshEventChannel, lsp.refreshErrorChannel, nil
 }
 
-func (lsp *LocalStorageProvider) StopAutoRefresh() error {
+func (lsp *LocalStorageProvider) StopAutoRefresh(commitToOptions bool) error {
 	if !lsp.initialized || !lsp.refreshEnabled {
 		return nil
 	}
 
 	lsp.refreshEnabled = false
+	if commitToOptions {
+		lsp.options.AutoRefreshEnabled = false
+	}
 	close(lsp.refreshEventChannel)
 	close(lsp.refreshErrorChannel)
 	return lsp.packageWatcher.Close()
