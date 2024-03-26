@@ -587,6 +587,7 @@ func (s *ArmoryServer) authorizationTokenMiddleware(next http.Handler) http.Hand
 		if slices.Contains(adminMethods, req.Method) {
 			if s.ArmoryServerConfig.SigningKeyProvider.Name() == consts.SigningKeyProviderExternal {
 				s.jsonForbidden(resp, errors.New("admin functions are not supported with an external signing key provider"))
+				return
 			}
 			if s.ArmoryServerConfig.AdminAuthorizationTokenDigest != "" && authHeaderDigestStr == s.ArmoryServerConfig.AdminAuthorizationTokenDigest {
 				next.ServeHTTP(resp, req)
