@@ -260,7 +260,10 @@ func setupVaultKeyProvider() error {
 			vaultKeyInfo.AppRolePath = vaultAppRolePathEnv
 		} else {
 			// Get the info from the user
-			survey.AskOne(&survey.Input{Message: "Vault app role path (default: approle):"}, &vaultKeyInfo.AppRolePath)
+			err = survey.AskOne(&survey.Input{Message: "Vault app role path (default: approle):"}, &vaultKeyInfo.AppRolePath)
+			if err != nil {
+				return ErrSigningKeyProviderRefused
+			}
 			if vaultKeyInfo.AppRolePath == "" {
 				vaultKeyInfo.AppRolePath = consts.VaultDefaultAppRolePath
 			}

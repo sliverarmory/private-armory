@@ -188,17 +188,26 @@ func getAndStoreSigningKey(password string) error {
 		case consts.SigningKeyProviderAWS:
 			err = setupAWSKeyProvider()
 			if err != nil {
+				if errors.Is(err, ErrSigningKeyProviderRefused) {
+					return fmt.Errorf("user cancelled")
+				}
 				// Then the user needs to fix their config, so bail
 				return fmt.Errorf("could not get package signing key from AWS: %s", err)
 			}
 		case consts.SigningKeyProviderVault:
 			err = setupVaultKeyProvider()
 			if err != nil {
+				if errors.Is(err, ErrSigningKeyProviderRefused) {
+					return fmt.Errorf("user cancelled")
+				}
 				return fmt.Errorf("could not get package signing key from Vault: %s", err)
 			}
 		case consts.SigningKeyProviderExternal:
 			err = setupExternalKeyProvider()
 			if err != nil {
+				if errors.Is(err, ErrSigningKeyProviderRefused) {
+					return fmt.Errorf("user cancelled")
+				}
 				return fmt.Errorf("could not set up external signing provider: %s", err)
 			}
 		default:
