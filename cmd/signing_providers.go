@@ -40,15 +40,20 @@ func setupLocalKeyProvider(password string) error {
 	var err error
 
 	provider := &signing.LocalSigningProvider{}
-	signingKeyDataEnv, signingKeySet := os.LookupEnv(consts.SigningKeyEnvVar)
-	if signingKeySet {
-		err = provider.SetPrivateKeyFromBytes([]byte(signingKeyDataEnv), password)
-	} else {
-		err = provider.New(&signing.LocalSigningKeyInfo{
-			Password:        password,
-			StorageProvider: runningServerConfig.StorageProvider,
-		})
+
+	// Command line first (runningServerConfig.SigningKeyProviderDetails will be LocalSigningKeyInfo if it was set)
+	localInfo, ok := runningServerConfig.SigningKeyProviderDetails.(*signing.LocalSigningKeyInfo)
+	if !ok {
+		localInfo = &signing.LocalSigningKeyInfo{}
+		localInfo.Password = password
+		signingKeyDataEnv, signingKeySet := os.LookupEnv(consts.SigningKeyEnvVar)
+		if signingKeySet {
+			localInfo.RawPrivateKey = []byte(signingKeyDataEnv)
+		}
 	}
+
+	localInfo.StorageProvider = runningServerConfig.StorageProvider
+	err = provider.New(localInfo)
 
 	if err != nil {
 		return err

@@ -48,6 +48,7 @@ type LocalSigningKeyInfo struct {
 	StorageProvider storage.StorageProvider
 	FileName        string
 	CopyToStorage   bool
+	RawPrivateKey   []byte
 }
 
 func (lski *LocalSigningKeyInfo) UnmarshalJSON(b []byte) error {
@@ -65,7 +66,7 @@ func (lski *LocalSigningKeyInfo) UnmarshalJSON(b []byte) error {
 
 func (lski *LocalSigningKeyInfo) MarshalJSON() ([]byte, error) {
 	// The password is not going to go into the JSON object
-	// File name and copy to storage are ephemeral
+	// File name and copy to storage are ephemeral, raw private key will not be output
 	return json.Marshal([]byte{})
 }
 
@@ -89,6 +90,10 @@ func (lsp *LocalSigningProvider) generateAndStoreKey(password string) error {
 }
 
 func (lsp *LocalSigningProvider) readKeyFromStorageProvider(password string) error {
+	if lsp.storageProvider == nil {
+		return errors.New("storage provider is not initialized")
+	}
+
 	key, err := lsp.storageProvider.ReadPackageSigningKey()
 
 	if err != nil {
@@ -161,6 +166,11 @@ func (lsp *LocalSigningProvider) New(keyInfo SigningKeyInfo) error {
 		if err != nil {
 			return err
 		}
+	} else if keyInfoLocal.RawPrivateKey != nil {
+		err := lsp.setPrivateKeyFromBytes(keyInfoLocal.RawPrivateKey, keyInfoLocal.Password)
+		if err != nil {
+			return err
+		}
 	} else {
 		err := lsp.readKeyFromStorageProvider(keyInfoLocal.Password)
 		if err != nil {
@@ -214,7 +224,7 @@ func (lsp *LocalSigningProvider) SetPrivateKey(key *minisign.PrivateKey) {
 	lsp.name = consts.SigningKeyProviderLocal
 }
 
-func (lsp *LocalSigningProvider) SetPrivateKeyFromBytes(keyData []byte, password string) error {
+func (lsp *LocalSigningProvider) setPrivateKeyFromBytes(keyData []byte, password string) error {
 	var err error
 
 	lsp.privateKey, err = minisign.DecryptKey(password, keyData)
