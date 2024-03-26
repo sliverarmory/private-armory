@@ -304,6 +304,19 @@ var signPackageCmd = &cobra.Command{
 		successMsg := fmt.Sprintf("Signed package %s successfully", filepath.Base(packagePath))
 		appLog.Infoln(successMsg)
 		fmt.Println(Success + successMsg)
+
+		refresh, err := cmd.Flags().GetBool(consts.RefreshFlagStr)
+		if err != nil {
+			errorMsg := fmt.Sprintf("could not get refresh flag state: %s", err)
+			fmt.Println(Warn + errorMsg)
+			appLog.Errorln(errorMsg)
+			return
+		}
+		if refresh {
+			appLog.Infoln("Refresh package index invoked...")
+			fmt.Println(Info + "Refreshing package index...")
+			runRefresh(appLog)
+		}
 	},
 }
 

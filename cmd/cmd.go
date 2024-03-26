@@ -137,6 +137,7 @@ func init() {
 
 	signPackageCmd.Flags().StringP(consts.ConfigFlagStr, "c", "", "Path to a configuration file for the armory (required)")
 	signPackageCmd.Flags().StringP(consts.FileFlagStr, "f", "", "Path to the package to sign (required)")
+	signPackageCmd.Flags().BoolP(consts.RefreshFlagStr, "r", false, "Refresh the package index after signing the package")
 	signPackageCmd.MarkFlagFilename(consts.ConfigFlagStr, "json")
 	signPackageCmd.MarkFlagRequired(consts.ConfigFlagStr)
 	signPackageCmd.MarkFlagFilename(consts.FileFlagStr, "tar.gz")

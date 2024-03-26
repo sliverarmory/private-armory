@@ -33,6 +33,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func runRefresh(appLog *logrus.Logger) {
+	errors := refreshArmoryIndex()
+	if len(errors) > 0 {
+		errMsg := "Failed to refresh armory index:"
+		fmt.Println(Warn + errMsg)
+		appLog.Errorln(errMsg)
+		for _, err := range errors {
+			appLog.Errorln(err)
+			fmt.Printf("%s%s\n", Warn, err)
+		}
+		return
+	}
+	appLog.Infoln("Successfully refreshed the package index")
+	fmt.Println(Success + "Successfully refreshed the package index")
+}
+
 func invokeRefreshIndex(cmd *cobra.Command) {
 	fmt.Printf(Info + "Refreshing armory index ...\n")
 	err := getCommonInfoForSigningCmds(cmd)
@@ -49,19 +65,7 @@ func invokeRefreshIndex(cmd *cobra.Command) {
 	appLog := log.StartLogger(appLogFile)
 	logrus.RegisterExitHandler(shutdownStorage)
 	appLog.Infoln("Refresh armory index invoked from command line")
-	errors := refreshArmoryIndex()
-	if len(errors) > 0 {
-		errMsg := "Failed to refresh armory index:"
-		fmt.Println(Warn + errMsg)
-		appLog.Errorln(errMsg)
-		for _, err := range errors {
-			appLog.Errorln(err)
-			fmt.Printf("%s%s\n", Warn, err)
-		}
-		return
-	}
-	appLog.Infoln("Successfully refreshed armory index")
-	fmt.Printf(Success + "Successfully refreshed armory index.\n")
+	runRefresh(appLog)
 }
 
 var refreshCmd = &cobra.Command{
