@@ -205,7 +205,7 @@ func (sw *S3Watcher) New(options WatcherOptions) error {
 
 	sw.eventChannel = make(chan string)
 	sw.errorChannel = make(chan error)
-	sw.doneChannel = make(chan struct{})
+	sw.doneChannel = make(chan struct{}, 1)
 
 	sw.paths = make(map[string][]string)
 

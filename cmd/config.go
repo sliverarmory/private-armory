@@ -237,9 +237,17 @@ func getServerConfig(cmd *cobra.Command) error {
 				fmt.Printf("%s could not delete application root %q: %s\n", Warn, runningServerConfig.StorageProvider.BasePath(), folderErr)
 			}
 			runningServerConfig = nil
+			return err
 		}
-		// Anything that would be overriden with the CLI has already been asked, so we are done
-		return err
+		// Anything that would be overriden with the CLI has already been asked, so we are good there
+		// When we first started, we did not know what the signing provider was. If the signing provider is external,
+		// we need to disable auto refresh for the storage provider.
+		if runningServerConfig.SigningKeyProviderName == consts.SigningKeyProviderExternal {
+			err = runningServerConfig.StorageProvider.StopAutoRefresh()
+			if err != nil {
+				return err
+			}
+		}
 	} else {
 		// This armory has been setup before, so we need to get the signing key
 		getAndStoreSigningKey(password)
