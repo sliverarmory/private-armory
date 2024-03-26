@@ -576,6 +576,7 @@ func initializeServerFromConfig(path string, storageOptions map[string]string, f
 		if !ok {
 			return fmt.Errorf("could not parse S3 storage options from config")
 		}
+
 		configuredStorageOptions = storage.S3StorageOptions{
 			BucketName:         optionsFromConfig.BucketName,
 			Directory:          optionsFromConfig.Directory,
@@ -603,6 +604,7 @@ func initializeServerFromConfig(path string, storageOptions map[string]string, f
 			if !ok {
 				return fmt.Errorf("could not parse local storage options from config")
 			}
+
 			configuredStorageOptions = storage.LocalStorageOptions{
 				BasePath:           optionsFromConfig.BasePath,
 				AutoRefreshEnabled: optionsFromConfig.AutoRefreshEnabled,
@@ -612,6 +614,11 @@ func initializeServerFromConfig(path string, storageOptions map[string]string, f
 		}
 	default:
 		return fmt.Errorf("%s is not a supported storage provider", parsedPath.Scheme)
+	}
+
+	// We cannot sign the index if the signing key provider is external
+	if runningServerConfig.SigningKeyProviderName == consts.SigningKeyProviderExternal {
+		forceRefreshOff = true
 	}
 
 	// Try to create a storage provider from the provider read from the config
@@ -709,6 +716,19 @@ func checkRootDirProviderConsistency(rootDir, providerName string) error {
 	return nil
 }
 
+func forceDisableRefresh(cmd *cobra.Command) bool {
+	// If this function is called from a sign command, we do not need to enable auto-refresh
+	if cmd.Parent() != nil && strings.HasSuffix(cmd.Parent().CommandPath(), "sign") {
+		return true
+	}
+
+	// If an external signing provider has been requested, we cannot sign the index, so
+	// we cannot refresh
+	signingProviderName, _ := cmd.Flags().GetString(consts.SigningProviderNameFlagStr)
+
+	return signingProviderName == consts.SigningKeyProviderExternal
+}
+
 func initializeServerFromStorage(cmd *cobra.Command) error {
 	// Get the config path or root dir to try to bootstrap the storage provider
 	configPath, err := cmd.Flags().GetString(consts.ConfigFlagStr)
@@ -722,8 +742,9 @@ func initializeServerFromStorage(cmd *cobra.Command) error {
 	}
 
 	forceRefreshOff := false
-	// If this function is called from a sign command, we do not need to enable auto-refresh
-	if cmd.Parent() != nil && strings.HasSuffix(cmd.Parent().CommandPath(), "sign") {
+
+	// Check to see if we have any conditions that force auto refresh off
+	if forceDisableRefresh(cmd) {
 		storageProviderOptions[consts.DisableAutoRefreshOptionStr] = "yes"
 		forceRefreshOff = true
 	}
@@ -848,13 +869,20 @@ func initializeServerFromStorage(cmd *cobra.Command) error {
 		} else {
 			fmt.Printf("Error reading config file %s, %s\n", configuredPaths.Config, err)
 		}
-		// Could not read a config file on disk for whatever reason, so we will use defaults and let CLI args override
+		// Could not read a config file from the storage provider for whatever reason, so we will use defaults and let CLI args override
 		fmt.Println("Using default configuration and allowing command arguments to override")
 	} else {
 		err = json.Unmarshal(configData, runningServerConfig)
 		if err != nil {
 			// Something was wrong with the config file, the user will have to fix it or re-run setup
 			return fmt.Errorf("error parsing config file %s, %s", configuredPaths.Config, err)
+		}
+		if runningServerConfig.SigningKeyProviderName == consts.SigningKeyProviderExternal {
+			// Turn off auto refresh because we cannot sign the index
+			err = runningServerConfig.StorageProvider.StopAutoRefresh()
+			if err != nil {
+				return fmt.Errorf("needed to stop auto refresh but encountered an error: %s", err)
+			}
 		}
 	}
 	runningServerConfig.RootDir = runningServerConfig.StorageProvider.BasePath()

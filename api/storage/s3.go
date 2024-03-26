@@ -382,6 +382,16 @@ func (ssp *S3StorageProvider) AutoRefreshChannels() (chan string, chan error, er
 	return watcherEvents, watcherErrors, nil
 }
 
+func (ssp *S3StorageProvider) StopAutoRefresh() error {
+	if !ssp.initialized || !ssp.refreshEnabled {
+		return nil
+	}
+
+	ssp.watcher.Close()
+	ssp.refreshEnabled = false
+	return nil
+}
+
 func (ssp *S3StorageProvider) Close() error {
 	// Errors would only be generated when closing the log files in cases when the log file
 	// was previously closed. We do not need to worry about that kind of error when tearing

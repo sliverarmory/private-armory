@@ -263,7 +263,11 @@ var rootCmd = &cobra.Command{
 		if err != nil {
 			appLog.Warnf("Package watcher was not initialized. The index will have to be refreshed manually. Error: %s", err)
 		} else if eventChannel == nil || errorChannel == nil {
-			appLog.Warnln("Storage provider does not support auto package refreshing. The index will have to be refreshed manually.")
+			if runningServerConfig.SigningKeyProvider.Name() == consts.SigningKeyProviderExternal {
+				appLog.Warnln("Auto package refreshing has been disabled because an external signing provider is being used. The index will have to be refreshed manually.")
+			} else {
+				appLog.Warnln("Storage provider does not support auto package refreshing. The index will have to be refreshed manually.")
+			}
 		} else {
 			appLog.Infoln("Package watcher initialized")
 			go func() {

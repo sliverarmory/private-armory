@@ -59,6 +59,8 @@ type StorageProvider interface {
 	AutoRefreshEnabled() (bool, error)
 	// Returns the channels for file events and errors. An error is returned if the provider is not initialized or there was an error in setting up auto refresh
 	AutoRefreshChannels() (chan string, chan error, error)
+	// Turn off auto refresh after the storage provider has started
+	StopAutoRefresh() error
 	// Perform any final cleanup that may need to be done before exiting
 	Close() error
 	// Removes the root directory and all of its subdirectories

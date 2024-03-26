@@ -263,6 +263,17 @@ func (lsp *LocalStorageProvider) AutoRefreshChannels() (chan string, chan error,
 	return lsp.refreshEventChannel, lsp.refreshErrorChannel, nil
 }
 
+func (lsp *LocalStorageProvider) StopAutoRefresh() error {
+	if !lsp.initialized || !lsp.refreshEnabled {
+		return nil
+	}
+
+	lsp.refreshEnabled = false
+	close(lsp.refreshEventChannel)
+	close(lsp.refreshErrorChannel)
+	return lsp.packageWatcher.Close()
+}
+
 func (lsp *LocalStorageProvider) Close() error {
 	// Errors would only be generated when closing the log files in cases when the log file
 	// was previously closed. We do not need to worry about that kind of error when tearing
@@ -271,6 +282,9 @@ func (lsp *LocalStorageProvider) Close() error {
 	lsp.initialized = false
 
 	if lsp.refreshEnabled {
+		close(lsp.refreshEventChannel)
+		close(lsp.refreshErrorChannel)
+		lsp.refreshEnabled = false
 		return lsp.packageWatcher.Close()
 	} else {
 		return nil

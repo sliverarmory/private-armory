@@ -290,6 +290,7 @@ func (sw *S3Watcher) Close() {
 		return
 	}
 	// Signal through the done channel to stop the update loop
+	// Channels will be closed when watchPaths() returns
 	sw.doneChannel <- struct{}{}
 	sw.initialized = false
 }
