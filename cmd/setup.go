@@ -45,6 +45,11 @@ var (
 	ErrPackageSigningKeyDecrypted = errors.New("")
 )
 
+func getPublicKeyFileName(privateKeyPath string) string {
+	baseKeyName := strings.TrimSuffix(filepath.Base(privateKeyPath), filepath.Ext(privateKeyPath)) + ".pub"
+	return filepath.Join(filepath.Dir(privateKeyPath), baseKeyName)
+}
+
 var genSignatureCmd = &cobra.Command{
 	Use:   "genkey",
 	Short: "Generate a package signing key",
@@ -60,6 +65,20 @@ var genSignatureCmd = &cobra.Command{
 				fmt.Printf("\n" + Info + "user cancelled\n")
 				return
 			}
+		} else if cmd.Flags().Changed(consts.PasswordFileFlagStr) {
+			fmt.Printf("\n" + Warn + Bold +
+				"*** Keys generated with a non-blank password are not compatible with the AWS and Vault key providers *** " +
+				Normal + Warn + "\n\n")
+			passwordFilePath, err := cmd.Flags().GetString(consts.PasswordFileFlagStr)
+			if err != nil {
+				fmt.Printf("%serror parsing flag %s, %s\n", Warn, consts.PasswordFileFlagStr, err)
+				return
+			}
+			passwordData, err := os.ReadFile(passwordFilePath)
+			if err != nil {
+				fmt.Printf(Warn+"Could not read file %q: %s\n", passwordFilePath, err)
+			}
+			password = string(passwordData)
 		} else {
 			password = ""
 		}
@@ -76,20 +95,28 @@ var genSignatureCmd = &cobra.Command{
 		}
 		fileName, err := cmd.Flags().GetString(consts.FileFlagStr)
 		if err != nil {
-			fmt.Printf("%s error parsing flag %s, %s\n", Warn, consts.FileFlagStr, err)
+			fmt.Printf("%serror parsing flag %s, %s\n", Warn, consts.FileFlagStr, err)
 			return
-		}
-		if fileName != "" {
-			err = os.WriteFile(fileName, encryptedPrivateKey, 0600)
-			if err != nil {
-				fmt.Printf("%s could not write key to %s: %s\n", Warn, fileName, err)
-				return
-			}
-			fmt.Printf("%s wrote key to %s\n", Info, fileName)
 		}
 		fmt.Println("\n" + Info + "Package signing key successfully generated:")
 		fmt.Printf("Public key:\n%s\n\n", public)
 		fmt.Printf("Private key:\n%s\n\n", string(encryptedPrivateKey))
+
+		if fileName != "" {
+			pubKeyName := getPublicKeyFileName(fileName)
+			err = os.WriteFile(fileName, encryptedPrivateKey, 0600)
+			if err != nil {
+				fmt.Printf("%scould not write private key to %s: %s\n", Warn, fileName, err)
+				return
+			}
+			err = os.WriteFile(pubKeyName, []byte(public.String()), 0666)
+			if err != nil {
+				fmt.Printf("%swrote private key to %s\n", Info, fileName)
+				fmt.Printf("%scould not write public key to %s: %s\n", Warn, pubKeyName, err)
+				return
+			}
+			fmt.Printf("%swrote key to %s (private), %s (public)\n", Info, fileName, pubKeyName)
+		}
 	},
 }
 
