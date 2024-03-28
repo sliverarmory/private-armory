@@ -19,45 +19,19 @@ package log
 */
 
 import (
-	"fmt"
-	"os"
-	"path/filepath"
+	"io"
 
 	"github.com/sirupsen/logrus"
 )
 
-// GetAppLogger - Returns the root logger
-func GetAppLogger(rootDir string) *logrus.Logger {
+// StartLogger - Returns a logger backed by the given io.Writer
+func StartLogger(backingFile io.Writer) *logrus.Logger {
 	txtLogger := logrus.New()
 	txtLogger.Formatter = &logrus.TextFormatter{
 		ForceColors:   false,
 		FullTimestamp: true,
 	}
-	txtFilePath := filepath.Join(rootDir, "app.log")
-	var err error
-	txtFile, err := os.OpenFile(txtFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
-	if err != nil {
-		panic(fmt.Sprintf("Failed to open log file %v", err))
-	}
-	txtLogger.Out = txtFile
-	txtLogger.SetLevel(logrus.DebugLevel)
-	return txtLogger
-}
-
-// GetAccessLogger - Returns the root logger
-func GetAccessLogger(rootDir string) *logrus.Logger {
-	txtLogger := logrus.New()
-	txtLogger.Formatter = &logrus.TextFormatter{
-		ForceColors:   false,
-		FullTimestamp: true,
-	}
-	txtFilePath := filepath.Join(rootDir, "access.log")
-	var err error
-	txtFile, err := os.OpenFile(txtFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
-	if err != nil {
-		panic(fmt.Sprintf("Failed to open log file %v", err))
-	}
-	txtLogger.Out = txtFile
+	txtLogger.Out = backingFile
 	txtLogger.SetLevel(logrus.DebugLevel)
 	return txtLogger
 }

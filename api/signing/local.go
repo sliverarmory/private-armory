@@ -1,5 +1,23 @@
 package signing
 
+/*
+	Sliver Implant Framework
+	Copyright (C) 2024  Bishop Fox
+
+	This program is free software: you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation, either version 3 of the License, or
+	(at your option) any later version.
+
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with this program.  If not, see <https://www.gnu.org/licenses/>.
+*/
+
 import (
 	"crypto/rand"
 	"encoding/base64"
@@ -9,6 +27,7 @@ import (
 	"os"
 
 	"aead.dev/minisign"
+	"github.com/sliverarmory/external-armory/api/storage"
 	"github.com/sliverarmory/external-armory/consts"
 )
 
@@ -18,14 +37,18 @@ const (
 )
 
 type LocalSigningProvider struct {
-	privateKey  minisign.PrivateKey
-	name        string
-	initialized bool
+	privateKey      minisign.PrivateKey
+	storageProvider storage.StorageProvider
+	name            string
+	initialized     bool
 }
 
 type LocalSigningKeyInfo struct {
-	Path     string
-	Password string
+	Password        string
+	StorageProvider storage.StorageProvider
+	FileName        string
+	CopyToStorage   bool
+	RawPrivateKey   []byte
 }
 
 func (lski *LocalSigningKeyInfo) UnmarshalJSON(b []byte) error {
@@ -35,8 +58,6 @@ func (lski *LocalSigningKeyInfo) UnmarshalJSON(b []byte) error {
 		return err
 	}
 
-	lski.Path = info[signingKeyPathJSONKey]
-
 	// Password is optional
 	lski.Password = info[signingKeyPasswordJSONKey]
 
@@ -45,24 +66,89 @@ func (lski *LocalSigningKeyInfo) UnmarshalJSON(b []byte) error {
 
 func (lski *LocalSigningKeyInfo) MarshalJSON() ([]byte, error) {
 	// The password is not going to go into the JSON object
+	// File name and copy to storage are ephemeral, raw private key will not be output
 	return json.Marshal([]byte{})
 }
 
-func generateAndStoreKey(path, password string) (minisign.PrivateKey, error) {
-	_, privateKey, err := minisign.GenerateKey(rand.Reader)
+func (lsp *LocalSigningProvider) generateAndStoreKey(password string) error {
+	var err error
+
+	_, lsp.privateKey, err = minisign.GenerateKey(rand.Reader)
 	if err != nil {
-		return privateKey, fmt.Errorf("failed to generate new signing key: %s", err)
+		return fmt.Errorf("failed to generate new signing key: %s", err)
 	}
-	encryptedKey, err := minisign.EncryptKey(password, privateKey)
+	encryptedKey, err := minisign.EncryptKey(password, lsp.privateKey)
 	if err != nil {
-		return privateKey, fmt.Errorf("failed to encrypt new signing key: %s", err)
+		return fmt.Errorf("failed to encrypt new signing key: %s", err)
 	}
-	err = os.WriteFile(path, encryptedKey, 0600)
+	err = lsp.storageProvider.WritePackageSigningKey(encryptedKey)
 	if err != nil {
-		return privateKey, fmt.Errorf("failed to write key to disk at %s: %s", path, err)
+		return fmt.Errorf("failed to write key to storage provider: %s", err)
 	}
 
-	return privateKey, nil
+	return nil
+}
+
+func (lsp *LocalSigningProvider) readKeyFromStorageProvider(password string) error {
+	if lsp.storageProvider == nil {
+		return errors.New("storage provider is not initialized")
+	}
+
+	key, err := lsp.storageProvider.ReadPackageSigningKey()
+
+	if err != nil {
+		if !errors.Is(err, storage.ErrDoesNotExist) {
+			return fmt.Errorf("could not get key from storage provider: %s", err)
+		} else {
+			// Create the key
+			err = lsp.generateAndStoreKey(password)
+			if err != nil {
+				return err
+			}
+		}
+	} else {
+		// The key exists
+		if len(key) == 0 {
+			return errors.New("key is empty and needs to be regenerated")
+		}
+
+		lsp.privateKey, err = minisign.DecryptKey(password, key)
+		if err != nil {
+			return fmt.Errorf("could not decrypt private key with provided password: %s", err)
+		}
+	}
+	return nil
+}
+
+func (lsp *LocalSigningProvider) readKeyFromLocalFileSystem(path, password string, copyToStorage bool) error {
+	if path == "" {
+		return errors.New("blank path provided")
+	}
+
+	keyData, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("could not read key from %q: %s", path, err)
+	}
+
+	if len(keyData) == 0 {
+		return errors.New("key is empty and needs to be regenerated")
+	}
+
+	lsp.privateKey, err = minisign.DecryptKey(password, keyData)
+	if err != nil {
+		return fmt.Errorf("could not decrypt private key with provided password: %s", err)
+	}
+
+	if copyToStorage {
+		if lsp.storageProvider == nil {
+			return errors.New("cannot copy signing key to storage provider because the storage provider is not initialized")
+		}
+		err = lsp.storageProvider.WritePackageSigningKey(keyData)
+		if err != nil {
+			return fmt.Errorf("could not write signing key to provider: %s", err)
+		}
+	}
+	return nil
 }
 
 func (lsp *LocalSigningProvider) New(keyInfo SigningKeyInfo) error {
@@ -74,30 +160,21 @@ func (lsp *LocalSigningProvider) New(keyInfo SigningKeyInfo) error {
 		return errors.New("incorrect key information provided")
 	}
 
-	keyPathInfo, err := os.Stat(keyInfoLocal.Path)
-	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("could not get information about key at %s: %s", keyInfoLocal.Path, err)
-		} else {
-			// Create the key
-			lsp.privateKey, err = generateAndStoreKey(keyInfoLocal.Path, keyInfoLocal.Password)
-			if err != nil {
-				return err
-			}
+	lsp.storageProvider = keyInfoLocal.StorageProvider
+	if keyInfoLocal.FileName != "" {
+		err := lsp.readKeyFromLocalFileSystem(keyInfoLocal.FileName, keyInfoLocal.Password, keyInfoLocal.CopyToStorage)
+		if err != nil {
+			return err
+		}
+	} else if keyInfoLocal.RawPrivateKey != nil {
+		err := lsp.setPrivateKeyFromBytes(keyInfoLocal.RawPrivateKey, keyInfoLocal.Password)
+		if err != nil {
+			return err
 		}
 	} else {
-		// The key exists
-		if keyPathInfo.Size() == 0 {
-			return fmt.Errorf("key %s is empty and needs to be regenerated", keyInfoLocal.Path)
-		}
-		keyData, err := os.ReadFile(keyInfoLocal.Path)
+		err := lsp.readKeyFromStorageProvider(keyInfoLocal.Password)
 		if err != nil {
-			return fmt.Errorf("could not read key file %s: %s", keyInfoLocal.Path, err)
-		}
-
-		lsp.privateKey, err = minisign.DecryptKey(keyInfoLocal.Password, keyData)
-		if err != nil {
-			return fmt.Errorf("could not decrypt private key with provided password: %s", err)
+			return err
 		}
 	}
 
@@ -145,4 +222,16 @@ func (lsp *LocalSigningProvider) SetPrivateKey(key *minisign.PrivateKey) {
 	lsp.privateKey = *key
 	lsp.initialized = true
 	lsp.name = consts.SigningKeyProviderLocal
+}
+
+func (lsp *LocalSigningProvider) setPrivateKeyFromBytes(keyData []byte, password string) error {
+	var err error
+
+	lsp.privateKey, err = minisign.DecryptKey(password, keyData)
+	if err != nil {
+		return fmt.Errorf("could not decrypt private key: %s", err)
+	}
+	lsp.initialized = true
+	lsp.name = consts.SigningKeyProviderLocal
+	return nil
 }

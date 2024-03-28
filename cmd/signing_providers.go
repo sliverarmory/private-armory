@@ -1,33 +1,65 @@
 package cmd
 
+/*
+	Sliver Implant Framework
+	Copyright (C) 2024  Bishop Fox
+
+	This program is free software: you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation, either version 3 of the License, or
+	(at your option) any later version.
+
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with this program.  If not, see <https://www.gnu.org/licenses/>.
+*/
+
 import (
 	"fmt"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/sliverarmory/external-armory/api/signing"
 	"github.com/sliverarmory/external-armory/consts"
-	"github.com/sliverarmory/external-armory/util"
 )
 
 /*
 Local
 */
-func setupLocalKeyProvider() error {
-	localKeyPath := filepath.Join(runningServerConfig.RootDir, consts.LocalSigningKeyName)
-	password, err := getUserSigningKeyPassword()
-	if err != nil {
-		return fmt.Errorf("could not get signing key password: %s", err)
+func setupLocalKeyProvider(password string) error {
+	if runningServerConfig == nil {
+		return ErrServerNotInitialized
 	}
 
+	var err error
+
 	provider := &signing.LocalSigningProvider{}
-	err = provider.New(&signing.LocalSigningKeyInfo{
-		Path:     localKeyPath,
-		Password: password,
-	})
+
+	// Command line first (runningServerConfig.SigningKeyProviderDetails will be LocalSigningKeyInfo if it was set)
+	localInfo, ok := runningServerConfig.SigningKeyProviderDetails.(*signing.LocalSigningKeyInfo)
+	if !ok {
+		localInfo = &signing.LocalSigningKeyInfo{}
+		localInfo.Password = password
+		signingKeyDataEnv, signingKeySet := os.LookupEnv(consts.SigningKeyEnvVar)
+		if signingKeySet {
+			localInfo.RawPrivateKey = []byte(signingKeyDataEnv)
+		}
+	}
+
+	localInfo.StorageProvider = runningServerConfig.StorageProvider
+	err = provider.New(localInfo)
+
+	if err != nil {
+		return err
+	}
+
+	publicKey, err := provider.PublicKey()
 	if err != nil {
 		return err
 	}
@@ -35,6 +67,8 @@ func setupLocalKeyProvider() error {
 	runningServerConfig.SigningKeyProvider = provider
 	runningServerConfig.SigningKeyProviderName = consts.SigningKeyProviderLocal
 	runningServerConfig.SigningKeyProviderDetails = nil
+	runningServerConfig.PublicKey = publicKey
+
 	return nil
 }
 
@@ -57,7 +91,7 @@ func getAWSRegionFromUser() string {
 // Attempts to get the package signing key from AWS SM
 func setupAWSKeyProvider() error {
 	if runningServerConfig == nil {
-		return fmt.Errorf("server not initialized - run setup first")
+		return ErrServerNotInitialized
 	}
 
 	awsKeyNameEnv, awsKeyNameSet := os.LookupEnv(consts.AWSKeySecretNameEnvVar)
@@ -107,10 +141,17 @@ func setupAWSKeyProvider() error {
 	if err != nil {
 		return err
 	}
+	publicKey, err := provider.PublicKey()
+	if err != nil {
+		return err
+	}
+
 	runningServerConfig.SigningKeyProvider = &provider
 	runningServerConfig.SigningKeyProviderName = consts.SigningKeyProviderAWS
 	runningServerConfig.SigningKeyProviderDetails = awsKeyInfo
-	fmt.Printf(Info + "Successfully retrieved signing key from AWS")
+	runningServerConfig.PublicKey = publicKey
+
+	fmt.Println(Info + "Successfully retrieved signing key from AWS")
 	return nil
 }
 
@@ -151,7 +192,7 @@ func vaultUsesTLS(urlStr string) bool {
 
 func setupVaultKeyProvider() error {
 	if runningServerConfig == nil {
-		return fmt.Errorf("server not initialized - run setup first")
+		return ErrServerNotInitialized
 	}
 
 	var err error
@@ -161,8 +202,6 @@ func setupVaultKeyProvider() error {
 	vaultAppRoleIDEnv, vaultAppRoleIDSet := os.LookupEnv(consts.VaultRoleIDEnvVar)
 	vaultAppSecretIDEnv, vaultAppSecretIDSet := os.LookupEnv(consts.VaultSecretIDEnvVar)
 	vaultKeyPathEnv, vaultKeyPathSet := os.LookupEnv(consts.VaultSigningKeyPathEnvVar)
-
-	customCAPath := filepath.Join(runningServerConfig.RootDir, consts.VaultCAPathFromRoot)
 
 	vaultKeyInfo, ok := runningServerConfig.SigningKeyProviderDetails.(*signing.VaultSigningKeyInfo)
 	if !ok {
@@ -186,31 +225,37 @@ func setupVaultKeyProvider() error {
 	vaultKeyInfo.TLSEnabled = vaultUsesTLS(vaultKeyInfo.Address)
 	// Check to see if we need to use a custom CA file
 	if vaultKeyInfo.TLSEnabled {
-		// If the PEM file for the CA has been supplied, then use that
-		if _, err := os.Stat(customCAPath); err == nil {
-			vaultKeyInfo.CustomCACert, err = os.ReadFile(customCAPath)
+		// If the PEM file for the CA has been supplied from the command line, then use that
+		if vaultKeyInfo.CustomCACert != nil {
+			err = runningServerConfig.StorageProvider.WriteVaultCA(vaultKeyInfo.CustomCACert)
 			if err != nil {
-				return fmt.Errorf("could not read custom CA certificate from %s: %s", customCAPath, err)
+				return fmt.Errorf("could not write custom CA certificate to storage provider: %s", err)
 			}
 		} else {
-			getCustomCA := userConfirm("Do you need to supply a custom CA PEM file?")
-			if getCustomCA {
-				caFilePath, err := getPathToFileFromUser("Path to custom CA PEM file (Ctrl-C to cancel):")
-				if err == nil {
-					// For future runs of the server, it is easier we keep the file at the default path
-					copyErr := util.CopyFile(caFilePath, customCAPath)
-					if copyErr != nil {
-						return fmt.Errorf("could not copy custom CA PEM file to application root: %s", err)
+			// Check to see if the storage provider has CA data in it already
+			vaultKeyInfo.CustomCACert, err = runningServerConfig.StorageProvider.ReadVaultCA()
+			if err != nil {
+				getCustomCA := userConfirm("Do you need to supply a custom CA PEM file?")
+				if getCustomCA {
+					caFilePath, err := getPathToFileFromUser("Path to custom CA PEM file (Ctrl-C to cancel):")
+					if err == nil {
+						// For future runs of the server, it is easier we keep the file at the default path
+						caData, err := os.ReadFile(caFilePath)
+						if err != nil {
+							return fmt.Errorf("could not read custom CA PEM file: %s", err)
+						}
+						err = runningServerConfig.StorageProvider.WriteVaultCA(caData)
+						if err != nil {
+							return fmt.Errorf("could not write custom CA certificate to storage provider: %s", err)
+						}
+						vaultKeyInfo.CustomCACert = caData
+					} else {
+						return fmt.Errorf("cancelled by user")
 					}
-					vaultKeyInfo.CustomCACert, err = os.ReadFile(caFilePath)
-					if err != nil {
-						return fmt.Errorf("could not read custom CA certificate from %s: %s", caFilePath, err)
-					}
-				} else {
-					return fmt.Errorf("cancelled by user")
 				}
 			}
 		}
+
 	}
 
 	// The app role path is optional, but if it is not filled in, we do not know
@@ -220,7 +265,10 @@ func setupVaultKeyProvider() error {
 			vaultKeyInfo.AppRolePath = vaultAppRolePathEnv
 		} else {
 			// Get the info from the user
-			survey.AskOne(&survey.Input{Message: "Vault app role path (default: approle):"}, &vaultKeyInfo.AppRolePath)
+			err = survey.AskOne(&survey.Input{Message: "Vault app role path (default: approle):"}, &vaultKeyInfo.AppRolePath)
+			if err != nil {
+				return ErrSigningKeyProviderRefused
+			}
 			if vaultKeyInfo.AppRolePath == "" {
 				vaultKeyInfo.AppRolePath = consts.VaultDefaultAppRolePath
 			}
@@ -279,10 +327,18 @@ func setupVaultKeyProvider() error {
 	if err != nil {
 		return err
 	}
+
+	publicKey, err := provider.PublicKey()
+	if err != nil {
+		return err
+	}
+
 	runningServerConfig.SigningKeyProvider = &provider
 	runningServerConfig.SigningKeyProviderName = consts.SigningKeyProviderVault
 	runningServerConfig.SigningKeyProviderDetails = vaultKeyInfo
-	fmt.Printf(Info + "Successfully retrieved signing key from Vault")
+	runningServerConfig.PublicKey = publicKey
+
+	fmt.Println(Info + "Successfully retrieved signing key from Vault")
 	return nil
 }
 
@@ -291,7 +347,7 @@ External
 */
 func setupExternalKeyProvider() error {
 	if runningServerConfig == nil {
-		return fmt.Errorf("server not initialized - run setup first")
+		return ErrServerNotInitialized
 	}
 	var err error
 
@@ -325,9 +381,17 @@ func setupExternalKeyProvider() error {
 		return err
 	}
 
+	publicKey, err := provider.PublicKey()
+	if err != nil {
+		// External signing providers do not return errors for public keys, but
+		// in case the function ever changes, we will be prepared
+		return err
+	}
+
 	runningServerConfig.SigningKeyProvider = &provider
 	runningServerConfig.SigningKeyProviderDetails = externalKeyInfo
 	runningServerConfig.SigningKeyProviderName = consts.SigningKeyProviderExternal
+	runningServerConfig.PublicKey = publicKey
 
 	return nil
 }

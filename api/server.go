@@ -30,14 +30,16 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
 	"github.com/sliverarmory/external-armory/api/signing"
+	"github.com/sliverarmory/external-armory/api/storage"
 	"github.com/sliverarmory/external-armory/consts"
+	"github.com/sliverarmory/external-armory/util"
 )
 
 var StatusOKResponse = []byte(`{"status": "ok"}`)
@@ -73,7 +75,11 @@ type ArmoryServerConfig struct {
 	SigningKeyProviderName    string                 `json:"signing_key_provider"`
 	SigningKeyProviderDetails signing.SigningKeyInfo `json:"signing_key_provider_details,omitempty"`
 
+	StorageProviderName    string                 `json:"storage_provider"`
+	StorageProviderDetails storage.StorageOptions `json:"storage_provider_details,omitempty"`
+
 	SigningKeyProvider signing.SigningProvider `json:"-"`
+	StorageProvider    storage.StorageProvider `json:"-"`
 }
 
 // Need a custom unmarshaler to properly unmarshal the SigningKeyInfo struct
@@ -81,6 +87,7 @@ func (asc *ArmoryServerConfig) UnmarshalJSON(data []byte) error {
 	// Unmarshal the signing key provider name
 	signingKeyTemp := new(struct {
 		ProviderType string `json:"signing_key_provider"`
+		StorageType  string `json:"storage_provider"`
 	})
 
 	if err := json.Unmarshal(data, signingKeyTemp); err != nil {
@@ -99,6 +106,16 @@ func (asc *ArmoryServerConfig) UnmarshalJSON(data []byte) error {
 	default:
 		return fmt.Errorf("unsupported signing key provider %q", signingKeyTemp.ProviderType)
 	}
+
+	switch signingKeyTemp.StorageType {
+	case consts.AWSS3StorageProviderStr:
+		asc.StorageProviderDetails = new(storage.S3StorageOptions)
+	case consts.LocalStorageProviderStr:
+		asc.StorageProviderDetails = new(storage.LocalStorageOptions)
+	default:
+		return fmt.Errorf("unsupported storage provider %q", signingKeyTemp.StorageType)
+	}
+
 	// Call unmarshal again
 	// Define a temporary type to avoid recursion
 	type ascAlias ArmoryServerConfig
@@ -264,14 +281,20 @@ func (s *ArmoryServer) IndexHandler(resp http.ResponseWriter, req *http.Request)
 }
 
 func (s *ArmoryServer) getIndex() ([]byte, []byte) {
-	indexPath := filepath.Join(s.ArmoryServerConfig.RootDir, consts.ArmoryIndexFileName)
-	indexData, err := os.ReadFile(indexPath)
+	if s.ArmoryServerConfig == nil {
+		s.AppLog.Errorln("Error reading index: server config is not initialized")
+		return nil, nil
+	}
+	if s.ArmoryServerConfig.StorageProvider == nil {
+		s.AppLog.Errorln("Error reading index: storage backend is not initialized")
+		return nil, nil
+	}
+	indexData, err := s.ArmoryServerConfig.StorageProvider.ReadIndex()
 	if err != nil {
 		s.AppLog.Errorf("Error reading index: %s", err)
 		return nil, nil
 	}
-	indexSigPath := filepath.Join(s.ArmoryServerConfig.RootDir, consts.ArmoryIndexSigFileName)
-	sigData, err := os.ReadFile(indexSigPath)
+	sigData, err := s.ArmoryServerConfig.StorageProvider.ReadIndexSignature()
 	if err != nil {
 		s.AppLog.Errorf("Error reading index: %s", err)
 		return nil, nil
@@ -279,41 +302,34 @@ func (s *ArmoryServer) getIndex() ([]byte, []byte) {
 	return indexData, sigData
 }
 
-func (s *ArmoryServer) getPackageData(packageName string, isAlias bool) ([]byte, error) {
-	// Make sure the package still exists
-	pkgPath := ""
-	if isAlias {
-		pkgPath = filepath.Join(s.ArmoryServerConfig.RootDir, consts.AliasesDirName, fmt.Sprintf("%s.tar.gz", packageName))
-	} else {
-		pkgPath = filepath.Join(s.ArmoryServerConfig.RootDir, consts.ExtensionsDirName, fmt.Sprintf("%s.tar.gz", packageName))
-	}
-	sigPath := filepath.Join(s.ArmoryServerConfig.RootDir, consts.SignaturesDirName, packageName)
-	_, err := os.Stat(pkgPath)
+func (s *ArmoryServer) getPackageData(packageName string, packageType consts.PackageType) ([]byte, error) {
+	_, err := s.ArmoryServerConfig.StorageProvider.CheckPackage(packageName)
 	if err != nil {
-		// There is something wrong with the package, remove signatures if any exist
-		os.Remove(sigPath)
-		return nil, fmt.Errorf("attempted to retrieve package %s, but encountered an error: %s", packageName, err)
+		removeSigErr := s.ArmoryServerConfig.StorageProvider.RemovePackageSignature(packageName)
+		if removeSigErr != nil {
+			return nil, fmt.Errorf("could not get information for package %q: %s; while trying to delete the signature, encountered another error: %s",
+				packageName, err, removeSigErr)
+		}
 	}
 
-	// Check the path
-	if _, err := os.Stat(sigPath); errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	}
-	sigData, err := os.ReadFile(sigPath)
+	sigData, err := s.ArmoryServerConfig.StorageProvider.ReadPackageSignature(packageName)
 	if err != nil {
 		return nil, fmt.Errorf("could not read sig file for package %s: %s", packageName, err)
 	}
 
-	pkgType := ""
-	if isAlias {
-		pkgType = consts.AliasesDirName
-	} else {
-		pkgType = consts.ExtensionsDirName
+	pkgDir := ""
+	switch packageType {
+	case consts.AliasPackageType:
+		pkgDir = consts.AliasesDirName
+	case consts.ExtensionPackageType:
+		pkgDir = consts.ExtensionsDirName
+	default:
+		return nil, fmt.Errorf("invalid package type specified")
 	}
 
 	pkgData := armoryPkgResponse{
 		Minisig:  base64.StdEncoding.EncodeToString(sigData),
-		TarGzURL: fmt.Sprintf("%s/armory/%s/%s/%s", s.ArmoryServerConfig.RepoURL(), pkgType, consts.ArchivePathName, packageName),
+		TarGzURL: fmt.Sprintf("%s/armory/%s/%s/%s", s.ArmoryServerConfig.RepoURL(), pkgDir, consts.ArchivePathName, packageName),
 	}
 
 	return json.Marshal(&pkgData)
@@ -328,7 +344,7 @@ func (s *ArmoryServer) AliasMetaHandler(resp http.ResponseWriter, req *http.Requ
 		s.jsonError(resp, fmt.Errorf("could not find alias path variable in URL: %s", req.URL.String()))
 		return
 	}
-	pkgData, err := s.getPackageData(requestedAlias, true)
+	pkgData, err := s.getPackageData(requestedAlias, consts.AliasPackageType)
 	if err != nil {
 		s.jsonError(resp, err)
 		return
@@ -346,8 +362,7 @@ func (s *ArmoryServer) AliasArchiveHandler(resp http.ResponseWriter, req *http.R
 		s.jsonError(resp, fmt.Errorf("could not find alias path variable in URL: %s", req.URL.String()))
 		return
 	}
-	fsPath := filepath.Join(s.ArmoryServerConfig.RootDir, consts.AliasesDirName, fmt.Sprintf("%s.tar.gz", requestedAlias))
-	archiveData, err := os.ReadFile(fsPath)
+	archiveData, err := s.ArmoryServerConfig.StorageProvider.ReadPackage(requestedAlias)
 	if err != nil {
 		s.jsonError(resp, err)
 		return
@@ -365,7 +380,7 @@ func (s *ArmoryServer) ExtensionMetaHandler(resp http.ResponseWriter, req *http.
 		s.jsonError(resp, fmt.Errorf("could not find extension path variable in URL: %s", req.URL.String()))
 		return
 	}
-	pkgData, err := s.getPackageData(requestedExtension, false)
+	pkgData, err := s.getPackageData(requestedExtension, consts.ExtensionPackageType)
 	if err != nil {
 		s.jsonError(resp, err)
 		return
@@ -383,8 +398,7 @@ func (s *ArmoryServer) ExtensionArchiveHandler(resp http.ResponseWriter, req *ht
 		s.jsonError(resp, fmt.Errorf("could not find extension path variable in URL: %s", req.URL.String()))
 		return
 	}
-	fsPath := filepath.Join(s.ArmoryServerConfig.RootDir, consts.ExtensionsDirName, fmt.Sprintf("%s.tar.gz", requestedExtension))
-	archiveData, err := os.ReadFile(fsPath)
+	archiveData, err := s.ArmoryServerConfig.StorageProvider.ReadPackage(requestedExtension)
 	if err != nil {
 		s.jsonError(resp, err)
 		return
@@ -393,46 +407,34 @@ func (s *ArmoryServer) ExtensionArchiveHandler(resp http.ResponseWriter, req *ht
 	resp.Write(archiveData)
 }
 
-func derivePackagePathAndNameFromRequest(rootDir string, req *http.Request) (string, string, error) {
+func derivePackageNameFromRequest(req *http.Request) (string, error) {
 	vars := mux.Vars(req)
 
-	requestedPackageType, ok := vars[consts.PackageTypePathVariable]
-	if !ok {
-		return "", "", fmt.Errorf("could not find package type in URL: %s", req.URL.String())
-	}
 	requestedPackageName, ok := vars[consts.PackageNamePathVariable]
 	if !ok {
-		return "", "", fmt.Errorf("could not find package name in URL: %s", req.URL.String())
+		return "", fmt.Errorf("could not find package name in URL: %s", req.URL.String())
 	}
 
-	packagePath := ""
-	switch requestedPackageType {
-	case consts.AliasesDirName:
-		packagePath = consts.AliasesDirName
-	case consts.ExtensionsDirName:
-		packagePath = consts.ExtensionsDirName
-	default:
-		return "", "", fmt.Errorf("%s is not a valid package type", requestedPackageType)
-	}
-
-	fsPath := filepath.Join(rootDir, packagePath, fmt.Sprintf("%s.tar.gz", requestedPackageName))
-
-	return fsPath, requestedPackageName, nil
+	return requestedPackageName, nil
 }
 
-func writePackageToDisk(packagePath string, requestedPackageName string, requestBody io.ReadCloser) error {
-	// When the package is written to disk, the server will automatically refresh the index
-	packageData, err := io.ReadAll(requestBody)
+func getManifestFromPackageData(packageData []byte) []byte {
+	var manifestData []byte
+	var err error
+
+	manifestData, err = util.ReadFileFromTarGzMemory(packageData, consts.AliasArchiveManifestFilePath)
 	if err != nil {
-		return fmt.Errorf("error processing request: %s", err)
+		return nil
+	}
+	if manifestData == nil {
+		// Then this may be an extension
+		manifestData, err = util.ReadFileFromTarGzMemory(packageData, consts.ExtensionArchiveManifestFilePath)
+		if err != nil {
+			return nil
+		}
 	}
 
-	err = os.WriteFile(packagePath, packageData, 0660)
-	if err != nil {
-		return fmt.Errorf("internal error comitting package %s: %s", requestedPackageName, err)
-	}
-
-	return nil
+	return manifestData
 }
 
 func (s *ArmoryServer) AddPackageHandler(resp http.ResponseWriter, req *http.Request) {
@@ -440,22 +442,57 @@ func (s *ArmoryServer) AddPackageHandler(resp http.ResponseWriter, req *http.Req
 
 	defer req.Body.Close()
 
-	fsPath, requestedPackageName, err := derivePackagePathAndNameFromRequest(s.ArmoryServerConfig.RootDir, req)
+	requestedPackageName, err := derivePackageNameFromRequest(req)
 	if err != nil {
 		s.jsonError(resp, err)
 		return
 	}
-
-	if _, err := os.Stat(fsPath); err == nil {
+	requestedPackageName = strings.TrimPrefix(requestedPackageName, "/")
+	_, err = s.ArmoryServerConfig.StorageProvider.CheckPackage(requestedPackageName)
+	if err == nil {
+		// The package exists
 		s.jsonError(resp, fmt.Errorf("%s already exists", requestedPackageName))
 		return
-	} else if !errors.Is(err, os.ErrNotExist) {
+	} else if !errors.Is(err, storage.ErrDoesNotExist) {
 		// If we have any other error than the file not existing, bail
 		s.jsonError(resp, fmt.Errorf("internal error for package %s: %s", requestedPackageName, err))
 		return
 	}
+
 	// If we get here, the package does not exist
-	err = writePackageToDisk(fsPath, requestedPackageName, req.Body)
+	packageData, err := io.ReadAll(req.Body)
+	if err != nil {
+		s.jsonError(resp, fmt.Errorf("error reading package %s from request", requestedPackageName))
+		return
+	}
+	manifestData := getManifestFromPackageData(packageData)
+	if manifestData == nil {
+		s.jsonError(resp, fmt.Errorf("could not extract manifest from provided package %s", requestedPackageName))
+		return
+	}
+
+	err = s.ArmoryServerConfig.StorageProvider.WritePackage(requestedPackageName, packageData)
+	if refreshEnabled, _ := s.ArmoryServerConfig.StorageProvider.AutoRefreshEnabled(); !refreshEnabled {
+		// The last error when setting up refreshing does not matter here - if refreshing is disabled, we have to
+		// sign the package
+		signature, err := s.ArmoryServerConfig.SigningKeyProvider.SignPackage(packageData, manifestData)
+		if err != nil {
+			s.jsonError(resp, fmt.Errorf("error signing package %s: %s", requestedPackageName, err))
+			return
+		}
+		err = s.ArmoryServerConfig.StorageProvider.WritePackageSignature(requestedPackageName, signature)
+		if err != nil {
+			s.jsonError(resp, fmt.Errorf("could not write signature for %s: %s", requestedPackageName, err))
+			err = s.ArmoryServerConfig.StorageProvider.RemovePackage(requestedPackageName)
+			if err != nil {
+				s.jsonError(resp, fmt.Errorf("could not delete package %s from storage provider: %s", requestedPackageName, err))
+			} else {
+				s.jsonError(resp, fmt.Errorf("deleted package %s from storage provider", requestedPackageName))
+			}
+			return
+		}
+	}
+
 	if err != nil {
 		s.jsonError(resp, err)
 		return
@@ -470,13 +507,14 @@ func (s *ArmoryServer) ModifyPackageHandler(resp http.ResponseWriter, req *http.
 
 	defer req.Body.Close()
 
-	fsPath, requestedPackageName, err := derivePackagePathAndNameFromRequest(s.ArmoryServerConfig.RootDir, req)
+	requestedPackageName, err := derivePackageNameFromRequest(req)
 	if err != nil {
 		s.jsonError(resp, err)
 		return
 	}
 
-	if _, err := os.Stat(fsPath); err != nil {
+	requestedPackageName = strings.TrimPrefix(requestedPackageName, "/")
+	if _, err := s.ArmoryServerConfig.StorageProvider.CheckPackage(requestedPackageName); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			s.jsonError(resp, fmt.Errorf("internal error for package %s: %s", requestedPackageName, err))
 			return
@@ -484,7 +522,13 @@ func (s *ArmoryServer) ModifyPackageHandler(resp http.ResponseWriter, req *http.
 	}
 
 	// If we are here, then the package exists, and we will overwrite it or it does not exist and we will add it
-	err = writePackageToDisk(fsPath, requestedPackageName, req.Body)
+	packageData, err := io.ReadAll(req.Body)
+	if err != nil {
+		s.jsonError(resp, fmt.Errorf("error reading package %s from request", requestedPackageName))
+		return
+	}
+
+	err = s.ArmoryServerConfig.StorageProvider.WritePackage(requestedPackageName, packageData)
 	if err != nil {
 		s.jsonError(resp, err)
 		return
@@ -496,23 +540,24 @@ func (s *ArmoryServer) ModifyPackageHandler(resp http.ResponseWriter, req *http.
 func (s *ArmoryServer) RemovePackageHandler(resp http.ResponseWriter, req *http.Request) {
 	resp.Header().Set("Content-Type", "application/json; charset=utf-8")
 
-	fsPath, requestedPackageName, err := derivePackagePathAndNameFromRequest(s.ArmoryServerConfig.RootDir, req)
+	requestedPackageName, err := derivePackageNameFromRequest(req)
 	if err != nil {
 		s.jsonError(resp, err)
 		return
 	}
 
-	_, err = os.Stat(fsPath)
+	requestedPackageName = strings.TrimPrefix(requestedPackageName, "/")
+
+	_, err = s.ArmoryServerConfig.StorageProvider.CheckPackage(requestedPackageName)
 
 	if err == nil {
 		// The package exists so we can delete it
-		err = os.Remove(fsPath)
+		err = s.ArmoryServerConfig.StorageProvider.RemovePackage(requestedPackageName)
 		if err != nil {
 			s.jsonError(resp, fmt.Errorf("internal error while deleting package %s: %s", requestedPackageName, err))
 			return
 		}
-		sigPath := filepath.Join(s.ArmoryServerConfig.RootDir, consts.SignaturesDirName, requestedPackageName)
-		err = os.Remove(sigPath)
+		err = s.ArmoryServerConfig.StorageProvider.RemovePackageSignature(requestedPackageName)
 		if err != nil {
 			s.jsonError(resp, fmt.Errorf("internal error while deleting package signature %s: %s", requestedPackageName, err))
 			return
@@ -540,6 +585,10 @@ func (s *ArmoryServer) authorizationTokenMiddleware(next http.Handler) http.Hand
 		authHeaderDigestStr := fmt.Sprintf("%x", authHeaderDigest[:])
 
 		if slices.Contains(adminMethods, req.Method) {
+			if s.ArmoryServerConfig.SigningKeyProvider.Name() == consts.SigningKeyProviderExternal {
+				s.jsonForbidden(resp, errors.New("admin functions are not supported with an external signing key provider"))
+				return
+			}
 			if s.ArmoryServerConfig.AdminAuthorizationTokenDigest != "" && authHeaderDigestStr == s.ArmoryServerConfig.AdminAuthorizationTokenDigest {
 				next.ServeHTTP(resp, req)
 				return

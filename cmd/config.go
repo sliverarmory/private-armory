@@ -21,10 +21,9 @@ package cmd
 import (
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sliverarmory/external-armory/api"
@@ -41,66 +40,80 @@ type ArmoryClientConfig struct {
 	AuthorizationCmd string `json:"authorization_cmd,omitempty"`
 }
 
+// Parses signing provider information received on the command line
+// If required information is not provided, the function does not return an error because the necessary information
+// may be provided later on through environment variables or asking the user
+// Returns an error if an unsupported provider is requested
+func parseSigningProviderOptions(signingProviderName string, signingProviderOptions map[string]string) (signing.SigningKeyInfo, error) {
+	var err error
+
+	switch signingProviderName {
+	case consts.SigningKeyProviderAWS:
+		awsConfigDetails := signing.AWSSigningKeyInfo{}
+		awsConfigDetails.Path = signingProviderOptions[consts.AWSSecretNameKey]
+		awsConfigDetails.Region = signingProviderOptions[consts.AWSRegionKey]
+		return &awsConfigDetails, nil
+	case consts.SigningKeyProviderExternal:
+		externalConfigDetails := signing.ExternalSigningKeyInfo{}
+		externalConfigDetails.PublicKey = signingProviderOptions[consts.ExternalPublicKeyKey]
+		return &externalConfigDetails, nil
+	case consts.SigningKeyProviderLocal:
+		localConfigDetails := signing.LocalSigningKeyInfo{}
+		localConfigDetails.Password = signingProviderOptions[consts.LocalKeyPasswordKey]
+		localConfigDetails.FileName = signingProviderOptions[consts.LocalKeyFileNameKey]
+		localConfigDetails.CopyToStorage = false
+		if copyValue, ok := signingProviderOptions[consts.LocalCopyKeyKey]; ok {
+			copyValue = strings.ToLower(copyValue)
+			if copyValue == "yes" || copyValue == "true" {
+				localConfigDetails.CopyToStorage = true
+			}
+		}
+		return &localConfigDetails, nil
+	case consts.SigningKeyProviderVault:
+		vaultConfigDetails := signing.VaultSigningKeyInfo{}
+		vaultConfigDetails.Address = signingProviderOptions[consts.VaultAddrKey]
+		vaultConfigDetails.AppRoleID = signingProviderOptions[consts.VaultAppRoleIDKey]
+		vaultConfigDetails.AppRolePath = signingProviderOptions[consts.VaultAppRolePathKey]
+		vaultConfigDetails.AppSecretID = signingProviderOptions[consts.VaultAppSecretIDKey]
+		vaultConfigDetails.VaultKeyPath = signingProviderOptions[consts.VaultKeyPathKey]
+		caFileLocation, ok := signingProviderOptions[consts.VaultCustomCAPathKey]
+		if ok {
+			// Try to read the CA file from the local filesystem
+			vaultConfigDetails.CustomCACert, err = os.ReadFile(caFileLocation)
+			if err != nil {
+				return nil, fmt.Errorf("could not read Vault CA PEM file from %q: %s", caFileLocation, err)
+			}
+		}
+		return &vaultConfigDetails, nil
+	default:
+		return nil, fmt.Errorf("signing provider %q is not supported", signingProviderName)
+	}
+}
+
 func checkForCmdSigningProvider(cmd *cobra.Command) error {
 	var err error
 
-	// The signing key provider will be filled in once the details are verified (and a key is retrieved)
-	if cmd.Flags().Changed(consts.AWSSigningKeySecretNameFlagStr) {
-		awsConfigDetails := signing.AWSSigningKeyInfo{}
-
-		awsConfigDetails.Path, err = cmd.Flags().GetString(consts.AWSSigningKeySecretNameFlagStr)
-		if err != nil {
-			return fmt.Errorf("error parsing flag --%s, %s", consts.AWSSigningKeySecretNameFlagStr, err)
-		}
-		awsConfigDetails.Region, err = cmd.Flags().GetString(consts.AWSRegionFlagStr)
-		if err != nil {
-			return fmt.Errorf("error parsing flag --%s, %s", consts.AWSRegionFlagStr, err)
-		}
-
-		runningServerConfig.SigningKeyProviderDetails = &awsConfigDetails
-	} else if cmd.Flags().Changed(consts.VaultURLFlagStr) {
-		vaultConfigDetails := signing.VaultSigningKeyInfo{}
-
-		vaultURL, err := cmd.Flags().GetString(consts.VaultURLFlagStr)
-		if err != nil {
-			return fmt.Errorf("error parsing flag --%s, %s", consts.VaultURLFlagStr, err)
-		}
-		vaultConfigDetails.Address = vaultURL
-
-		vaultApprolePath, err := cmd.Flags().GetString(consts.VaultAppRolePathFlagStr)
-		if err != nil {
-			return fmt.Errorf("error parsing flag --%s, %s", consts.VaultAppRolePathFlagStr, err)
-		}
-		vaultConfigDetails.AppRolePath = vaultApprolePath
-
-		vaultRoleID, err := cmd.Flags().GetString(consts.VaultRoleIDFlagStr)
-		if err != nil {
-			return fmt.Errorf("error parsing flag --%s, %s", consts.VaultRoleIDFlagStr, err)
-		}
-		vaultConfigDetails.AppRoleID = vaultRoleID
-
-		vaultSecretID, err := cmd.Flags().GetString(consts.VaultSecretIDFlagStr)
-		if err != nil {
-			return fmt.Errorf("error parsing flag --%s, %s", consts.VaultSecretIDFlagStr, err)
-		}
-		vaultConfigDetails.AppSecretID = vaultSecretID
-
-		vaultPath, err := cmd.Flags().GetString(consts.VaultKeyPathFlagStr)
-		if err != nil {
-			return fmt.Errorf("error parsing flag --%s, %s", consts.VaultKeyPathFlagStr, err)
-		}
-		vaultConfigDetails.VaultKeyPath = vaultPath
-
-		runningServerConfig.SigningKeyProviderDetails = &vaultConfigDetails
-	} else if cmd.Flags().Changed(consts.PublicKeyFlagStr) {
-		externalSignerDetails := signing.ExternalSigningKeyInfo{}
-		publicKey, err := cmd.Flags().GetString(consts.PublicKeyFlagStr)
-		if err != nil {
-			return fmt.Errorf("error parsing flag --%s, %s", consts.PublicKeyFlagStr, err)
-		}
-		externalSignerDetails.PublicKey = publicKey
-		runningServerConfig.SigningKeyProviderDetails = &externalSignerDetails
+	if !cmd.Flags().Changed(consts.SigningProviderNameFlagStr) {
+		// If the signing provider name was not specified, then we will have to look at the config file and environment variables
+		return nil
 	}
+
+	signingProviderName, err := cmd.Flags().GetString(consts.SigningProviderNameFlagStr)
+	if err != nil {
+		return fmt.Errorf("error parsing flag --%s, %s", consts.SigningProviderNameFlagStr, err)
+	}
+
+	signingProviderOptions, err := cmd.Flags().GetStringToString(consts.SigningProviderOptionsFlagStr)
+	if err != nil {
+		return fmt.Errorf("error parsing flag --%s, %s", consts.SigningProviderOptionsFlagStr, err)
+	}
+
+	// The signing key provider will be filled in once the details are verified (and a key is retrieved)
+	runningServerConfig.SigningKeyProviderDetails, err = parseSigningProviderOptions(signingProviderName, signingProviderOptions)
+	if err != nil {
+		return err
+	}
+	runningServerConfig.SigningKeyProviderName = signingProviderName
 
 	return nil
 }
@@ -126,36 +139,10 @@ func getServerConfig(cmd *cobra.Command) error {
 		WriteTimeout:                   time.Duration(5 * time.Minute),
 		SigningKeyProviderDetails:      nil,
 	}
-	runningServerConfig.RootDir, err = getRootDir(cmd)
+
+	err = initializeServerFromStorage(cmd)
 	if err != nil {
 		return fmt.Errorf("could not determine root directory and start the server: %s", err)
-	}
-	configPath, err := cmd.Flags().GetString(consts.ConfigFlagStr)
-	if err != nil {
-		return fmt.Errorf("error parsing flag --%s, %s", consts.ConfigFlagStr, err)
-	}
-	if configPath == "" {
-		cwd, _ := os.Getwd()
-		configPath = filepath.Join(cwd, consts.ArmoryRootDirName, consts.ConfigFileName)
-		if runningServerConfig.RootDir == "" {
-			runningServerConfig.RootDir = filepath.Join(cwd, consts.ArmoryRootDirName)
-		}
-	}
-	configData, err := os.ReadFile(configPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			fmt.Printf(Warn+"Config file %s does not exist\n", configPath)
-		} else {
-			fmt.Printf("Error reading config file %s, %s\n", configPath, err)
-		}
-		// Could not read a config file on disk for whatever reason, so we will use defaults and let CLI args override
-		fmt.Println("Using default configuration and allowing command arguments to override")
-	} else {
-		err = json.Unmarshal(configData, runningServerConfig)
-		if err != nil {
-			// Something was wrong with the config file, the user will have to fix it or re-run setup
-			return fmt.Errorf("error parsing config file %s, %s", configPath, err)
-		}
 	}
 
 	// We need to check some CLI arguments in case setup needs to be run
@@ -199,6 +186,14 @@ func getServerConfig(cmd *cobra.Command) error {
 		flagsChanged = append(flagsChanged, consts.LportFlagStr)
 	}
 
+	if cmd.Flags().Changed(consts.EnableTLSFlagStr) {
+		runningServerConfig.TLSEnabled, err = cmd.Flags().GetBool(consts.EnableTLSFlagStr)
+		if err != nil {
+			return fmt.Errorf("error parsing flag --%s, %s", consts.EnableTLSFlagStr, err)
+		}
+		flagsChanged = append(flagsChanged, consts.EnableTLSFlagStr)
+	}
+
 	if cmd.Flags().Changed(consts.ReadTimeoutFlagStr) {
 		readTimeoutStr, err := cmd.Flags().GetString(consts.ReadTimeoutFlagStr)
 		if err != nil {
@@ -225,23 +220,50 @@ func getServerConfig(cmd *cobra.Command) error {
 		flagsChanged = append(flagsChanged, consts.WriteTimeoutFlagStr)
 	}
 
+	// Get signing key password
+	password, err := extractSigningPasswordFromCmdOrEnv(cmd)
+	if err != nil {
+		return err
+	}
+
 	// At this point, we should know where the root dir is
 	// If the necessary directories are not setup, then we need to run setup
-	if !checkApplicationDirectories(runningServerConfig.RootDir) {
-		err = runSetup(flagsChanged)
+	if runningServerConfig.StorageProvider.IsNew() {
+		err = runSetup(flagsChanged, password)
 		if err != nil {
 			// Remove the directories we created
-			folderErr := os.RemoveAll(runningServerConfig.RootDir)
+			folderErr := runningServerConfig.StorageProvider.Destroy()
 			if folderErr != nil {
-				fmt.Printf("%s could not delete application directory %s: %s\n", Warn, runningServerConfig.RootDir, folderErr)
+				fmt.Printf("%s could not delete application root %q: %s\n", Warn, runningServerConfig.StorageProvider.BasePath(), folderErr)
 			}
 			runningServerConfig = nil
+			return err
 		}
-		// Anything that would be overriden with the CLI has already been asked, so we are done
-		return err
+		// Anything that would be overriden with the CLI has already been asked, so we are good there
+		// When we first started, we did not know what the signing provider was. If the signing provider is external,
+		// we need to disable auto refresh for the storage provider.
+		if runningServerConfig.SigningKeyProviderName == consts.SigningKeyProviderExternal {
+			err = runningServerConfig.StorageProvider.StopAutoRefresh(true)
+			if err != nil {
+				return err
+			}
+		}
 	} else {
 		// This armory has been setup before, so we need to get the signing key
-		getAndStoreSigningKey()
+		getAndStoreSigningKey(password)
+		if runningServerConfig.TLSEnabled {
+			// Make sure we have the certificates set up properly if we are going to enable TLS
+			// If it fails, make sure to update the config
+			tlsEnabled := checkIfTLSEnabled()
+			runningServerConfig.TLSEnabled = tlsEnabled
+		}
+
+		if cmd.Flags().Changed(consts.UpdateConfigFlagStr) {
+			err = writeServerConfig()
+			if err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil

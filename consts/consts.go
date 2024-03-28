@@ -1,5 +1,7 @@
 package consts
 
+import "os"
+
 /*
 	Sliver Implant Framework
 	Copyright (C) 2022  Bishop Fox
@@ -21,36 +23,48 @@ package consts
 type PackageType int
 
 const (
-	ArmoryRootDirName         = "armory-data"
-	ExtensionsDirName         = "extensions"
-	AliasesDirName            = "aliases"
-	BundlesFileName           = "bundles.json"
-	ConfigFileName            = "config.json"
-	CertificatesDirName       = "certificates"
-	TLSKeyPathFromRoot        = CertificatesDirName + "/armory.key"
-	TLSCertPathFromRoot       = CertificatesDirName + "/armory.crt"
-	DefaultListenPort         = 8888
-	DefaultAWSRegion          = "us-west-2"
-	LocalSigningKeyName       = "private.key"
-	VaultCAPathFromRoot       = CertificatesDirName + "/armory-vault-ca.pem"
-	AliasManifestFileName     = "alias.json"
-	ExtensionManifestFileName = "extension.json"
+	ArmoryRootDirName                = "armory-data"
+	ExtensionsDirName                = "extensions"
+	AliasesDirName                   = "aliases"
+	BundlesFileName                  = "bundles.json"
+	ConfigFileName                   = "config.json"
+	CertificatesDirName              = "certificates"
+	TLSKeyFileName                   = "armory.key"
+	TLSCertFileName                  = "armory.crt"
+	VaultCAFileName                  = "armory-vault-ca.pem"
+	TLSKeyPathFromRoot               = CertificatesDirName + string(os.PathSeparator) + TLSKeyFileName
+	TLSCertPathFromRoot              = CertificatesDirName + string(os.PathSeparator) + TLSCertFileName
+	DefaultListenPort                = 8888
+	DefaultAWSRegion                 = "us-west-2"
+	LocalSigningKeyName              = "private.key"
+	VaultCAPathFromRoot              = CertificatesDirName + string(os.PathSeparator) + VaultCAFileName
+	AliasManifestFileName            = "alias.json"
+	AliasArchiveManifestFilePath     = "./" + AliasManifestFileName
+	ExtensionManifestFileName        = "extension.json"
+	ExtensionArchiveManifestFilePath = "./" + ExtensionManifestFileName
+	LogDirName                       = "logs"
+	AppLogName                       = "app"
+	AccessLogName                    = "access"
 
 	// Command line flags
-	LhostFlagStr        = "lhost"
-	LportFlagStr        = "lport"
-	ConfigFlagStr       = "config"
-	WriteTimeoutFlagStr = "write-timeout"
-	ReadTimeoutFlagStr  = "read-timeout"
-	DisableAuthFlagStr  = "disable-authentication"
-	RefreshFlagStr      = "refresh"
-	DomainFlagStr       = "domain"
-	EnableTLSFlagStr    = "enable-tls"
-	PublicKeyFlagStr    = "public-key"
-	FileFlagStr         = "file"
-	PasswordFlagStr     = "password"
-	PasswordFileFlagStr = "password-file"
-	KeyFlagStr          = "key"
+	LhostFlagStr                  = "lhost"
+	LportFlagStr                  = "lport"
+	ConfigFlagStr                 = "config"
+	WriteTimeoutFlagStr           = "write-timeout"
+	ReadTimeoutFlagStr            = "read-timeout"
+	DisableAuthFlagStr            = "disable-authentication"
+	RefreshFlagStr                = "refresh"
+	DomainFlagStr                 = "domain"
+	EnableTLSFlagStr              = "enable-tls"
+	FileFlagStr                   = "file"
+	PasswordFlagStr               = "password"
+	PasswordFileFlagStr           = "password-file"
+	KeyFlagStr                    = "key"
+	UpdateConfigFlagStr           = "update"
+	StorageProviderNameFlagStr    = "storage-provider"
+	SigningProviderNameFlagStr    = "signing-provider"
+	StorageProviderOptionsFlagStr = "storage-provider-options"
+	SigningProviderOptionsFlagStr = "signing-provider-options"
 
 	RootDirFlagStr = "root-dir"
 
@@ -61,16 +75,7 @@ const (
 	PackageTypePathVariable = "package_type"
 	PackageNamePathVariable = "package_name"
 
-	// AWS
-	AWSSigningKeySecretNameFlagStr = "aws-key-name"
-	AWSRegionFlagStr               = "aws-region"
-
 	// Vault
-	VaultURLFlagStr         = "vault-url"
-	VaultAppRolePathFlagStr = "vault-approle-path"
-	VaultRoleIDFlagStr      = "vault-role-id"
-	VaultSecretIDFlagStr    = "vault-secret-id"
-	VaultKeyPathFlagStr     = "vault-path"
 	VaultDefaultAppRolePath = "approle"
 
 	// Environment variables
@@ -81,7 +86,7 @@ const (
 	TLSEnabledEnvVar          = "ARMORY_TLS_ENABLED"
 	SigningKeyProviderEnvVar  = "ARMORY_SIGNING_KEY_PROVIDER"
 	AWSKeySecretNameEnvVar    = "ARMORY_AWS_SIGNING_KEY"
-	AWSKeyRegionEnvVar        = "ARMORY_AWS_REGION"
+	AWSKeyRegionEnvVar        = "ARMORY_AWS_SK_REGION"
 	VaultAddrEnvVar           = "ARMORY_VAULT_ADDR"
 	VaultAppRolePathEnvVar    = "ARMORY_VAULT_APP_ROLE_PATH"
 	VaultRoleIDEnvVar         = "ARMORY_VAULT_APP_ROLE_ID"
@@ -89,6 +94,8 @@ const (
 	VaultSigningKeyPathEnvVar = "ARMORY_VAULT_SIGNING_KEY_PATH"
 	ExternalPublicKeyEnvVar   = "ARMORY_EXTERNAL_PUBLIC_KEY"
 	SigningKeyEnvVar          = "ARMORY_SIGNING_KEY"
+	RootDirEnvVar             = "ARMORY_ROOT_DIR"
+	AWSS3RegionEnvVar         = "ARMORY_S3_REGION"
 
 	// Signing Key Providers
 	SigningKeyProviderAWS      = "aws"
@@ -99,19 +106,36 @@ const (
 	// Signing Key Provider Details
 	AWSSecretNameKey        = "secret-name"
 	AWSRegionKey            = "region"
+	ExternalPublicKeyKey    = "public-key"
+	LocalKeyPasswordKey     = "password"
+	LocalKeyFileNameKey     = "file"
+	LocalCopyKeyKey         = "copy"
 	VaultAddrKey            = "addr"
 	VaultAppRolePathKey     = "app-role-path"
 	VaultAppRoleIDKey       = "roleID"
 	VaultAppSecretIDKey     = "secretID"
 	VaultKeyPathKey         = "key-path"
 	VaultCustomCAEnabledKey = "use-custom-ca"
+	VaultCustomCAPathKey    = "ca-path"
+
+	// Storage Providers
+	AWSS3StorageProviderStr = "s3"
+	LocalStorageProviderStr = "local"
+
+	// Storage Provider Options
+	AWSS3RegionOptionStr          = "region"
+	AWSS3BucketOptionStr          = "bucket"
+	AWSS3BucketDirectoryOptionStr = "directory"
+	LocalStoragePathOptionStr     = "path"
+	DisableAutoRefreshOptionStr   = "disable-refresh"
 
 	// Should not be edited directly, so hide them
 	ArmoryIndexFileName    = ".armory-index.json"
-	ArmoryIndexSigFileName = ".armory-index.minsig"
+	ArmoryIndexSigFileName = ".armory-index.minisig"
 	SignaturesDirName      = ".armory-minisigs"
 
 	// Package types
 	AliasPackageType PackageType = iota
 	ExtensionPackageType
+	UnknownPackageType
 )

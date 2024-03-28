@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -33,8 +34,8 @@ import (
 
 	"aead.dev/minisign"
 	"github.com/AlecAivazis/survey/v2"
+	"github.com/sliverarmory/external-armory/api/storage"
 	"github.com/sliverarmory/external-armory/consts"
-	"github.com/sliverarmory/external-armory/util"
 	"github.com/spf13/cobra"
 )
 
@@ -43,6 +44,11 @@ var (
 	// An error to signal that the signing key has already been decrypted
 	ErrPackageSigningKeyDecrypted = errors.New("")
 )
+
+func getPublicKeyFileName(privateKeyPath string) string {
+	baseKeyName := strings.TrimSuffix(filepath.Base(privateKeyPath), filepath.Ext(privateKeyPath)) + ".pub"
+	return filepath.Join(filepath.Dir(privateKeyPath), baseKeyName)
+}
 
 var genSignatureCmd = &cobra.Command{
 	Use:   "genkey",
@@ -59,36 +65,58 @@ var genSignatureCmd = &cobra.Command{
 				fmt.Printf("\n" + Info + "user cancelled\n")
 				return
 			}
+		} else if cmd.Flags().Changed(consts.PasswordFileFlagStr) {
+			fmt.Printf("\n" + Warn + Bold +
+				"*** Keys generated with a non-blank password are not compatible with the AWS and Vault key providers *** " +
+				Normal + Warn + "\n\n")
+			passwordFilePath, err := cmd.Flags().GetString(consts.PasswordFileFlagStr)
+			if err != nil {
+				fmt.Printf("%serror parsing flag %s, %s\n", Warn, consts.PasswordFileFlagStr, err)
+				return
+			}
+			passwordData, err := os.ReadFile(passwordFilePath)
+			if err != nil {
+				fmt.Printf(Warn+"Could not read file %q: %s\n", passwordFilePath, err)
+			}
+			password = string(passwordData)
 		} else {
 			password = ""
 		}
 
 		public, private, err := minisign.GenerateKey(rand.Reader)
 		if err != nil {
-			fmt.Printf(Warn+"failed to generate public/private key(s): %s", err)
+			fmt.Printf(Warn+"Failed to generate public/private key(s): %s", err)
 			return
 		}
 		encryptedPrivateKey, err := minisign.EncryptKey(password, private)
 		if err != nil {
-			fmt.Printf(Warn+"failed to generate public/private key(s): %s", err)
+			fmt.Printf(Warn+"Failed to generate public/private key(s): %s", err)
 			return
 		}
 		fileName, err := cmd.Flags().GetString(consts.FileFlagStr)
 		if err != nil {
-			fmt.Printf("%s error parsing flag %s, %s\n", Warn, consts.FileFlagStr, err)
+			fmt.Printf("%serror parsing flag %s, %s\n", Warn, consts.FileFlagStr, err)
 			return
 		}
-		if fileName != "" {
-			err = os.WriteFile(fileName, encryptedPrivateKey, 0600)
-			if err != nil {
-				fmt.Printf("%s could not write key to %s: %s\n", Warn, fileName, err)
-				return
-			}
-			fmt.Printf("%s wrote key to %s\n", Info, fileName)
-		}
-		fmt.Println("\n" + Info + "Package signing key successfully generated:")
+		fmt.Println(Info + "Package signing key successfully generated:")
 		fmt.Printf("Public key:\n%s\n\n", public)
 		fmt.Printf("Private key:\n%s\n\n", string(encryptedPrivateKey))
+
+		if fileName != "" {
+			pubKeyName := getPublicKeyFileName(fileName)
+			err = os.WriteFile(fileName, encryptedPrivateKey, 0600)
+			if err != nil {
+				fmt.Printf("%sCould not write private key to %s: %s\n", Warn, fileName, err)
+				return
+			}
+			err = os.WriteFile(pubKeyName, []byte(public.String()), 0666)
+			if err != nil {
+				fmt.Printf("%sWrote private key to %s\n", Info, fileName)
+				fmt.Printf("%sCould not write public key to %s: %s\n", Warn, pubKeyName, err)
+				return
+			}
+			fmt.Printf("%sWrote key to %s (private), %s (public)\n", Info, fileName, pubKeyName)
+		}
 	},
 }
 
@@ -137,51 +165,6 @@ func askForNumber(prompt string, min, max, defaultValue int) (int, error) {
 	return result, err
 }
 
-// Checks a given path to see if it is a directory, and if it is not, creates it
-// The name parameter is a descriptive name and is used for informing the user
-func checkAndCreateDirectory(name, path string) error {
-	pathInfo, err := os.Stat(path)
-	if os.IsNotExist(err) {
-		fmt.Printf(Info+"Creating %s directory: %s\n", name, path)
-		return os.Mkdir(path, 0755)
-	}
-	if !pathInfo.IsDir() {
-		return fmt.Errorf("%s exists but is not a directory", path)
-	}
-	// Then the path exists and is a directory
-	return nil
-}
-
-// Checks if a path is a directory
-func checkDirectory(path string) bool {
-	pathInfo, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-	if !pathInfo.IsDir() {
-		return false
-	}
-	return true
-}
-
-// Checks to see if the application's directories are setup
-func checkApplicationDirectories(rootDir string) bool {
-	appDirs := []string{
-		filepath.Join(rootDir, consts.ExtensionsDirName),
-		filepath.Join(rootDir, consts.AliasesDirName),
-		filepath.Join(rootDir, consts.SignaturesDirName),
-		filepath.Join(rootDir, consts.CertificatesDirName),
-	}
-
-	for _, dir := range appDirs {
-		if !checkDirectory(dir) {
-			return false
-		}
-	}
-
-	return true
-}
-
 // Gets the listening port for the server from the user or the environment
 func getListeningPort() uint16 {
 	var err error
@@ -189,7 +172,11 @@ func getListeningPort() uint16 {
 	listenPort := consts.DefaultListenPort
 	listenPortEnv, listenPortEnvSet := os.LookupEnv(consts.PortEnvVar)
 	if !listenPortEnvSet {
-		listenPort, err = askForNumber(fmt.Sprintf("Listening port (default: %d):", consts.DefaultListenPort), 1, math.MaxUint16, consts.DefaultListenPort)
+		listenPort, err = askForNumber(fmt.Sprintf("Listening port (default: %d):", consts.DefaultListenPort),
+			1,
+			math.MaxUint16,
+			consts.DefaultListenPort,
+		)
 	} else {
 		listenPort, err = strconv.Atoi(listenPortEnv)
 		if listenPort < 1 || listenPort > math.MaxUint16 || err != nil {
@@ -208,38 +195,51 @@ func getListeningPort() uint16 {
 	return uint16(listenPort)
 }
 
-func getAndStoreSigningKey() error {
+func getAndStoreSigningKey(password string) error {
 	var err error
 	var signingProvider string
 
-	// Check to see if the provider was passed in as an environment variable
-	signingKeyProviderEnv, signingKeyProviderSet := os.LookupEnv(consts.SigningKeyProviderEnvVar)
-	if signingKeyProviderSet {
-		signingProvider = signingKeyProviderEnv
-	} else if runningServerConfig.SigningKeyProviderName != "" {
+	// Check to see if we already got signing provider details from the command line
+	if runningServerConfig.SigningKeyProviderName != "" {
 		signingProvider = runningServerConfig.SigningKeyProviderName
+	} else {
+		// Check to see if the provider was passed in as an environment variable
+		signingKeyProviderEnv, signingKeyProviderSet := os.LookupEnv(consts.SigningKeyProviderEnvVar)
+		if signingKeyProviderSet {
+			signingProvider = signingKeyProviderEnv
+		}
 	}
+
 	if signingProvider != "" {
 		switch signingProvider {
 		case consts.SigningKeyProviderAWS:
 			err = setupAWSKeyProvider()
 			if err != nil {
+				if errors.Is(err, ErrSigningKeyProviderRefused) {
+					return fmt.Errorf("user cancelled")
+				}
 				// Then the user needs to fix their config, so bail
 				return fmt.Errorf("could not get package signing key from AWS: %s", err)
 			}
 		case consts.SigningKeyProviderVault:
 			err = setupVaultKeyProvider()
 			if err != nil {
+				if errors.Is(err, ErrSigningKeyProviderRefused) {
+					return fmt.Errorf("user cancelled")
+				}
 				return fmt.Errorf("could not get package signing key from Vault: %s", err)
 			}
 		case consts.SigningKeyProviderExternal:
 			err = setupExternalKeyProvider()
 			if err != nil {
+				if errors.Is(err, ErrSigningKeyProviderRefused) {
+					return fmt.Errorf("user cancelled")
+				}
 				return fmt.Errorf("could not set up external signing provider: %s", err)
 			}
 		default:
 			// The provider is not supported or is local, fall back to file
-			return setupLocalKeyProvider()
+			return setupLocalKeyProvider(password)
 		}
 	} else {
 		// Go through each of the providers until we find the correct one
@@ -268,46 +268,70 @@ func getAndStoreSigningKey() error {
 			return err // nil
 		}
 		fmt.Printf(Info + "Using a local package signing key\n")
-		err = setupLocalKeyProvider()
+		err = setupLocalKeyProvider(password)
 	}
 	return err
 }
 
+func generateClientToken() string {
+	clientToken, clientTokenDigest := randomAuthorizationToken()
+
+	runningServerConfig.ClientAuthorizationTokenDigest = clientTokenDigest
+
+	return clientToken
+}
+
+func showClientConfig(pubKey, clientToken string) {
+	fmt.Println()
+	userConfig, _ := json.MarshalIndent(&ArmoryClientConfig{
+		PublicKey:     pubKey,
+		RepoURL:       runningServerConfig.RepoURL() + "/" + path.Join("armory", "index"),
+		Authorization: clientToken,
+	}, "", "    ")
+	fmt.Printf(Bold + "*** THIS WILL ONLY BE SHOWN ONCE ***\n")
+	fmt.Printf(Bold+">>> User Config:%s\n%s\n\n", Normal, userConfig)
+}
+
+func writeServerConfig() error {
+	serverConfigData, _ := json.MarshalIndent(runningServerConfig, "", "  ")
+	err := runningServerConfig.StorageProvider.WriteConfig(serverConfigData)
+	if err != nil {
+		return fmt.Errorf("could not write server config: %s", err)
+	}
+
+	return nil
+}
+
 // Runs initial setup to make sure we have everything need to run the armory
-func runSetup(flagsChanged []string) error {
+func runSetup(flagsChanged []string, password string) error {
+	if runningServerConfig == nil {
+		return ErrServerNotInitialized
+	}
+
 	var err error
+	var configPath string
 
-	directories := map[string]string{
-		"extensions":   filepath.Join(runningServerConfig.RootDir, consts.ExtensionsDirName),
-		"aliases":      filepath.Join(runningServerConfig.RootDir, consts.AliasesDirName),
-		"signatures":   filepath.Join(runningServerConfig.RootDir, consts.SignaturesDirName),
-		"certificates": filepath.Join(runningServerConfig.RootDir, consts.CertificatesDirName),
-	}
-	bundleFileName := filepath.Join(runningServerConfig.RootDir, consts.BundlesFileName)
-
-	// Make sure the root directory is created first if it does not exist
-	err = checkAndCreateDirectory("root", runningServerConfig.RootDir)
-	if err != nil {
-		return err
-	}
-
-	for name, dir := range directories {
-		err = checkAndCreateDirectory(name, dir)
+	if runningServerConfig.StorageProvider != nil {
+		storagePaths, err := runningServerConfig.StorageProvider.Paths()
 		if err != nil {
-			return err
+			return ErrServerNotInitialized
 		}
+		configPath = storagePaths.Config
 	}
 
-	fmt.Printf(Info+"Creating default bundle information file: %s\n", bundleFileName)
-	err = os.WriteFile(bundleFileName, []byte(`[]`), 0644)
-	if err != nil {
-		return err
+	if configPath != "" {
+		fmt.Printf(Info+"Generating configuration: %s\n", configPath)
+	} else {
+		fmt.Printf(Info + "Generating configuration\n")
 	}
 
 	if !slices.Contains(flagsChanged, consts.DomainFlagStr) {
 		domain, domainEnvSet := os.LookupEnv(consts.DomainEnvVar)
 		if !domainEnvSet {
-			survey.AskOne(&survey.Input{Message: "IP or domain name for clients to reach the armory (or blank for the internal IP of this host):"}, &domain)
+			err = survey.AskOne(&survey.Input{Message: "IP or domain name for clients to reach the armory (or blank for the internal IP of this host):"}, &domain)
+			if err != nil {
+				return err
+			}
 		} else {
 			domain = strings.Trim(domain, "\"")
 		}
@@ -319,57 +343,49 @@ func runSetup(flagsChanged []string) error {
 		runningServerConfig.ListenPort = getListeningPort()
 	}
 
+	// If this is the first setup, we still need to get the certificates from the user
 	runningServerConfig.TLSEnabled = checkIfTLSEnabled()
 
-	fmt.Printf(Info+"Generating default configuration: %s\n", filepath.Join(runningServerConfig.RootDir, consts.ConfigFileName))
-
-	err = getAndStoreSigningKey()
+	err = getAndStoreSigningKey(password)
 	if err != nil {
 		return err
 	}
 
 	clientToken := ""
-	clientTokenDigest := ""
-	enableClientAuth := false
+	disableClientAuth := runningServerConfig.ClientAuthenticationDisabled
 
 	// This is a bit confusing, but if the disable auth flag was changed, then the user wants to disable auth
 	if !slices.Contains(flagsChanged, consts.DisableAuthFlagStr) {
 		authChoiceEnv, authEnvSet := os.LookupEnv(consts.AuthEnabledEnvVar)
 		if !authEnvSet {
-			enableClientAuth = userConfirm("Enable client authentication?")
+			disableClientAuth = userConfirm("Disable client authentication?")
 		} else {
-			if authChoiceEnv == "1" {
-				enableClientAuth = true
+			if authChoiceEnv != "1" {
+				disableClientAuth = true
 			}
 		}
-	} else {
-		enableClientAuth = true
 	}
 
-	if enableClientAuth {
-		clientToken, clientTokenDigest = randomAuthorizationToken()
+	runningServerConfig.ClientAuthenticationDisabled = disableClientAuth
+
+	if !disableClientAuth {
+		clientToken = generateClientToken()
 	}
-	runningServerConfig.ClientAuthenticationDisabled = !enableClientAuth
-	runningServerConfig.ClientAuthorizationTokenDigest = clientTokenDigest
 
 	adminToken, adminTokenDigest := randomAuthorizationToken()
 	runningServerConfig.AdminAuthorizationTokenDigest = adminTokenDigest
 
-	serverConfigData, _ := json.MarshalIndent(runningServerConfig, "", "  ")
-	os.WriteFile(filepath.Join(runningServerConfig.RootDir, consts.ConfigFileName), serverConfigData, 0660)
+	err = writeServerConfig()
+	if err != nil {
+		return err
+	}
 
 	fmt.Println()
 	pubKey, err := runningServerConfig.SigningKeyProvider.PublicKey()
 	if err != nil {
 		return err
 	}
-	userConfig, _ := json.MarshalIndent(&ArmoryClientConfig{
-		PublicKey:     pubKey,
-		RepoURL:       runningServerConfig.RepoURL() + "/" + path.Join("armory", "index"),
-		Authorization: clientToken,
-	}, "", "    ")
-	fmt.Printf(Bold + "*** THIS WILL ONLY BE SHOWN ONCE ***\n")
-	fmt.Printf(Bold+">>> User Config:%s\n%s\n\n", Normal, userConfig)
+	showClientConfig(pubKey, clientToken)
 	fmt.Printf(Bold+">>> Admin Authentication Token (use this for adding, modifying, and deleting packages): %s\n%s\n", Normal, adminToken)
 
 	return nil
@@ -404,13 +420,15 @@ func getPathToFileFromUser(prompt string) (string, error) {
 
 // Determines whether TLS is enabled, either by asking the user or looking at the TLS key files in their expected locations
 func checkIfTLSEnabled() bool {
+	if runningServerConfig == nil {
+		return false
+	}
+
 	var err error
 	enableTLS := false
 
 	// Look for the TLS key and cert
 	tlsEnabledEnv, tlsEnabledSet := os.LookupEnv(consts.TLSEnabledEnvVar)
-	defaultTLSKeyLocation := filepath.Join(runningServerConfig.RootDir, consts.TLSKeyPathFromRoot)
-	defaultTLSCertLocation := filepath.Join(runningServerConfig.RootDir, consts.TLSCertPathFromRoot)
 
 	if tlsEnabledSet {
 		if tlsEnabledEnv != "1" {
@@ -418,10 +436,10 @@ func checkIfTLSEnabled() bool {
 		}
 	}
 
-	fileInfo, err := os.Stat(defaultTLSKeyLocation)
+	keyData, err := runningServerConfig.StorageProvider.ReadTLSCertificateKey()
 
-	if os.IsNotExist(err) {
-		enableTLS = userConfirm("Enable TLS?")
+	if errors.Is(err, storage.ErrDoesNotExist) {
+		enableTLS = userConfirm("The TLS key does not exist in the expected location. Enable TLS?")
 		if !enableTLS {
 			return enableTLS
 		} else {
@@ -430,54 +448,53 @@ func checkIfTLSEnabled() bool {
 				// Ctrl-C is returned as an error, so if we encounter any errors, then bail
 				return enableTLS
 			}
-			err = util.CopyFile(tlsKeyPath, defaultTLSKeyLocation)
+			userKeyData, err := os.ReadFile(tlsKeyPath)
 			if err != nil {
-				fmt.Printf(Warn+"Could not copy TLS key file from %s to %s: %s. TLS will be disabled", tlsKeyPath, defaultTLSKeyLocation, err)
+				fmt.Printf(Warn+"Could not read TLS key file from %s: %s. TLS will be disabled", tlsKeyPath, err)
+				return enableTLS
+			}
+			err = runningServerConfig.StorageProvider.WriteTLSCertificateKey(userKeyData)
+			if err != nil {
+				fmt.Printf(Warn+"Could not copy TLS key file from %s to storage provider: %s. TLS will be disabled", tlsKeyPath, err)
 				return enableTLS
 			}
 		}
-	} else if fileInfo.Size() == 0 {
+	} else if err != nil {
+		fmt.Printf(Warn+"Disabling TLS: could not read TLS key from storage provider: %s\n", err)
+		return enableTLS
+	} else if len(keyData) == 0 {
 		// Then the TLS key is an empty file, so we will disable TLS
+		fmt.Println(Warn + "Disabling TLS: TLS private key is empty")
 		return enableTLS
 	}
 
-	fileInfo, err = os.Stat(defaultTLSCertLocation)
-	if os.IsNotExist(err) {
+	crtData, err := runningServerConfig.StorageProvider.ReadTLSCertificateCrt()
+
+	if errors.Is(err, storage.ErrDoesNotExist) {
 		tlsCertPath, err := getPathToFileFromUser("Path to TLS certificate file (Ctrl-C to cancel):")
 		if err != nil {
 			return enableTLS
 		}
-		err = util.CopyFile(tlsCertPath, defaultTLSCertLocation)
+		userCrtData, err := os.ReadFile(tlsCertPath)
 		if err != nil {
-			fmt.Printf(Warn+"Could not copy TLS key file from %s to %s: %s. TLS will be disabled", tlsCertPath, defaultTLSKeyLocation, err)
+			fmt.Printf(Warn+"Could not read TLS certificate file from %s: %s. TLS will be disabled", tlsCertPath, err)
 			return enableTLS
 		}
-	} else if fileInfo.Size() == 0 {
-		// Without a valid key, we cannot enable TLS
+		err = runningServerConfig.StorageProvider.WriteTLSCertificateCrt(userCrtData)
+		if err != nil {
+			fmt.Printf(Warn+"Could not copy TLS certificate file from %s to storage provider: %s. TLS will be disabled", tlsCertPath, err)
+			return enableTLS
+		}
+	} else if err != nil {
+		fmt.Printf(Warn+"Disabling TLS: could not read TLS cert from storage provider: %s\n", err)
+		return enableTLS
+	} else if len(crtData) == 0 {
+		// Without a valid cert, we cannot enable TLS
+		fmt.Println(Warn + "Disabling TLS: TLS cert is empty")
 		return enableTLS
 	}
 
 	return true
-}
-
-// Returns the password for the package signing key or gets it from the environment or user
-func getUserSigningKeyPassword() (string, error) {
-	if runningServerConfig != nil {
-		if runningServerConfig.SigningKeyProvider != nil && runningServerConfig.SigningKeyProvider.Initialized() {
-			// We have already decrypted the key, so we do not need the password
-			return "", ErrPackageSigningKeyDecrypted
-		}
-	}
-
-	armoryPasswordEnv, passwordEnvSet := os.LookupEnv(consts.SigningKeyPasswordEnvVar)
-	if passwordEnvSet {
-		return strings.Trim(armoryPasswordEnv, "\""), nil
-	}
-	password := ""
-	prompt := &survey.Password{Message: "Private key password:"}
-	survey.AskOne(prompt, &password)
-
-	return password, nil
 }
 
 func userConfirm(msg string) bool {
@@ -487,7 +504,7 @@ func userConfirm(msg string) bool {
 	return confirmed
 }
 
-func getDefaultRootDir() (string, error) {
+func getDefaultLocalRootDir() (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", err
@@ -495,17 +512,417 @@ func getDefaultRootDir() (string, error) {
 	return filepath.Join(cwd, consts.ArmoryRootDirName), nil
 }
 
-func getRootDir(cmd *cobra.Command) (string, error) {
-	rootDir, err := cmd.Flags().GetString(consts.RootDirFlagStr)
+func getS3BucketRegion(bucketName string) (string, error) {
+	// Try to get the region from the environment
+	s3Region, s3RegionSet := os.LookupEnv(consts.AWSS3RegionEnvVar)
+	if !s3RegionSet {
+		err := survey.AskOne(&survey.Input{
+			Message: fmt.Sprintf("Region for bucket %s:", bucketName),
+			Default: "us-east-1",
+		},
+			&s3Region,
+			survey.WithValidator(survey.Required),
+		)
+		if err != nil {
+			return "", errors.New("canceled by user")
+		}
+	}
+	return s3Region, nil
+}
+
+func createStorageProvider(storageProviderType string, options storage.StorageOptions, forceRefreshOff bool) (storage.StorageProvider, error) {
+	var storageProvider storage.StorageProvider
+
+	switch storageProviderType {
+	case consts.AWSS3StorageProviderStr:
+		s3Options, ok := options.(storage.S3StorageOptions)
+		if !ok {
+			return nil, errors.New("invalid options provided for S3 storage provider")
+		}
+		if forceRefreshOff {
+			s3Options.AutoRefreshEnabled = false
+		}
+		storageProvider = &storage.S3StorageProvider{}
+		err := storageProvider.New(s3Options, true)
+		if err != nil {
+			return nil, fmt.Errorf("could not initialize S3 storage provider: %s", err)
+		}
+	case consts.LocalStorageProviderStr:
+		localOptions, ok := options.(storage.LocalStorageOptions)
+		if !ok {
+			return nil, errors.New("invalid options provided for local storage provider")
+		}
+		if forceRefreshOff {
+			localOptions.AutoRefreshEnabled = false
+		}
+		storageProvider = &storage.LocalStorageProvider{}
+		err := storageProvider.New(localOptions, true)
+		if err != nil {
+			return nil, fmt.Errorf("could not initialize local storage provider: %s", err)
+		}
+	default:
+		return nil, fmt.Errorf("unsupported storage provider %q", storageProviderType)
+	}
+
+	return storageProvider, nil
+}
+
+func initializeServerFromConfig(path string, storageOptions map[string]string, forceRefreshOff bool) error {
+	var configuredStorageOptions storage.StorageOptions
+
+	parsedPath, err := url.Parse(path)
 	if err != nil {
-		// This usually happens if the cmd does not have a root-dir flag, so unless a config has been specified, assume the default root dir
-		// The only command that calls this function and does not have a root-dir flag is refresh, and if the user wants to refresh an index
-		// that does not live in the default root dir, they should be passing a config file
-		rootDir = ""
+		return fmt.Errorf("could not parse path %q: %s", path, err)
 	}
+
+	switch parsedPath.Scheme {
+	case consts.AWSS3StorageProviderStr:
+		// The "host" is the bucket name
+		bucketDir := strings.TrimPrefix(filepath.Dir(parsedPath.Path), "/")
+		// Try to get the region
+		region, ok := storageOptions[consts.AWSRegionKey]
+		if !ok {
+			region, err = getS3BucketRegion(parsedPath.Host)
+			if err != nil {
+				return err
+			}
+		}
+		options := storage.S3StorageOptions{
+			BucketName: parsedPath.Host,
+			Directory:  bucketDir,
+			Region:     region,
+			// This is a temporary storage provider until we read the config
+			AutoRefreshEnabled: false,
+		}
+		tempStorageProvider, err := createStorageProvider(consts.AWSS3StorageProviderStr, options, forceRefreshOff)
+		if err != nil {
+			return err
+		}
+		defer tempStorageProvider.Close()
+		// Try to get the config from the bucket
+		configData, err := tempStorageProvider.ReadConfig()
+		if err != nil {
+			return fmt.Errorf("error reading config file %q: %s", path, err)
+		}
+		err = json.Unmarshal(configData, &runningServerConfig)
+		if err != nil {
+			return fmt.Errorf("error parsing config file %q: %s", path, err)
+		}
+		optionsFromConfig, ok := runningServerConfig.StorageProviderDetails.(*storage.S3StorageOptions)
+		if !ok {
+			return fmt.Errorf("could not parse S3 storage options from config")
+		}
+
+		configuredStorageOptions = storage.S3StorageOptions{
+			BucketName:         optionsFromConfig.BucketName,
+			Directory:          optionsFromConfig.Directory,
+			Region:             optionsFromConfig.Region,
+			AutoRefreshEnabled: optionsFromConfig.AutoRefreshEnabled,
+		}
+	case "", "file":
+		// Then the path provided is on the local file system - we need to determine if it is a config file or a directory
+		pathInfo, err := os.Stat(parsedPath.Path)
+		if err != nil {
+			return fmt.Errorf("could not get info about %q: %s", path, err)
+		}
+		if !pathInfo.IsDir() {
+			// We could spin up a local storage provider for this, but it is not necessary since we only need the config data
+			configData, err := os.ReadFile(parsedPath.Path)
+			if err != nil {
+				return fmt.Errorf("could not read file %q: %s", path, err)
+			}
+			err = json.Unmarshal(configData, &runningServerConfig)
+			if err != nil {
+				// Something was wrong with the config file, the user will have to fix it or re-run setup
+				return fmt.Errorf("error parsing config file %q: %s", path, err)
+			}
+			optionsFromConfig, ok := runningServerConfig.StorageProviderDetails.(*storage.LocalStorageOptions)
+			if !ok {
+				return fmt.Errorf("could not parse local storage options from config")
+			}
+
+			configuredStorageOptions = storage.LocalStorageOptions{
+				BasePath:           optionsFromConfig.BasePath,
+				AutoRefreshEnabled: optionsFromConfig.AutoRefreshEnabled,
+			}
+		} else {
+			return fmt.Errorf("%q is not a path to a configuration file", parsedPath.Path)
+		}
+	default:
+		return fmt.Errorf("%s is not a supported storage provider", parsedPath.Scheme)
+	}
+
+	// We cannot sign the index if the signing key provider is external
+	if runningServerConfig.SigningKeyProviderName == consts.SigningKeyProviderExternal {
+		forceRefreshOff = true
+	}
+
+	// Try to create a storage provider from the provider read from the config
+	runningServerConfig.StorageProvider, err = createStorageProvider(runningServerConfig.StorageProviderName, configuredStorageOptions, forceRefreshOff)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func deriveProviderFromRootDir(rootDir string) (string, error) {
+	parsedRootDir, err := url.Parse(rootDir)
+	if err != nil {
+		return "", fmt.Errorf("could not parse supplied root directory: %s", err)
+	}
+
+	switch parsedRootDir.Scheme {
+	case consts.AWSS3StorageProviderStr:
+		return consts.AWSS3StorageProviderStr, nil
+	case "", "file":
+		return consts.LocalStorageProviderStr, nil
+	default:
+		return "", fmt.Errorf("unsupported storage provider %q for root directory", parsedRootDir.Scheme)
+	}
+}
+
+func parseStorageProviderOptions(rootDir, providerName string, providerOptions map[string]string) (string, storage.StorageOptions, error) {
+	var rootDirDerived string
+
+	if providerName == "" {
+		// Try to derive the provider name from the supplied root dir (if one was supplied)
+		rootDirProvider, err := deriveProviderFromRootDir(rootDir)
+		if err != nil {
+			return "", nil, err
+		}
+		providerName = rootDirProvider
+	}
+
+	switch providerName {
+	case consts.AWSS3StorageProviderStr:
+		options := storage.S3StorageOptions{}
+		options.Region = providerOptions[consts.AWSS3RegionOptionStr]
+		options.BucketName = providerOptions[consts.AWSS3BucketOptionStr]
+		options.Directory = providerOptions[consts.AWSS3BucketDirectoryOptionStr]
+		if options.BucketName != "" {
+			if options.Directory != "" {
+				rootDirDerived = fmt.Sprintf("s3://%s/%s/", options.BucketName, options.Directory)
+			} else {
+				rootDirDerived = fmt.Sprintf("s3://%s", options.BucketName)
+			}
+		}
+		if rootDirDerived == "" && rootDir != "" {
+			rootDirDerived = rootDir
+		}
+		return rootDirDerived, options, nil
+	case consts.LocalStorageProviderStr:
+		options := storage.LocalStorageOptions{}
+		options.BasePath = providerOptions[consts.LocalStoragePathOptionStr]
+		rootDirDerived = options.BasePath
+		if rootDirDerived == "" && rootDir != "" {
+			rootDirDerived = rootDir
+		}
+		return rootDirDerived, options, nil
+	case "":
+		// If the provider name is not given to us, then it will have to be figured out later
+		return rootDir, nil, nil
+	default:
+		return rootDirDerived, nil, fmt.Errorf("unsupported storage provider %q", providerName)
+	}
+}
+
+func checkRootDirProviderConsistency(rootDir, providerName string) error {
+	if rootDir == "" || providerName == "" {
+		return nil
+	}
+
+	rootDirProvider, err := deriveProviderFromRootDir(rootDir)
+	if err != nil {
+		return err
+	}
+
+	switch rootDirProvider {
+	case consts.AWSS3StorageProviderStr:
+		// If the root directory is an S3 bucket, then provider name should match
+		if providerName != consts.AWSS3StorageProviderStr {
+			return fmt.Errorf("an S3 root directory was provided, so \"s3\" was the expected storage provider, got %q instead", providerName)
+		}
+	case "", "file":
+		if providerName != consts.LocalStorageProviderStr {
+			return fmt.Errorf("a local directory path was provided, so \"local\" was the expected storage provider, got %q instead", providerName)
+		}
+	}
+
+	return nil
+}
+
+func forceDisableRefresh(cmd *cobra.Command) bool {
+	// If this function is called from a sign command, we do not need to enable auto-refresh
+	if cmd.Parent() != nil && strings.HasSuffix(cmd.Parent().CommandPath(), "sign") {
+		return true
+	}
+
+	// If an external signing provider has been requested, we cannot sign the index, so
+	// we cannot refresh
+	signingProviderName, _ := cmd.Flags().GetString(consts.SigningProviderNameFlagStr)
+
+	return signingProviderName == consts.SigningKeyProviderExternal
+}
+
+func initializeServerFromStorage(cmd *cobra.Command) error {
+	// Get the config path or root dir to try to bootstrap the storage provider
+	configPath, err := cmd.Flags().GetString(consts.ConfigFlagStr)
+	if err != nil {
+		return fmt.Errorf("error parsing flag --%s, %s", consts.ConfigFlagStr, err)
+	}
+
+	storageProviderOptions, err := cmd.Flags().GetStringToString(consts.StorageProviderOptionsFlagStr)
+	if err != nil {
+		return fmt.Errorf("error parsing flag --%s, %s", consts.StorageProviderOptionsFlagStr, err)
+	}
+
+	forceRefreshOff := false
+
+	// Check to see if we have any conditions that force auto refresh off
+	if forceDisableRefresh(cmd) {
+		storageProviderOptions[consts.DisableAutoRefreshOptionStr] = "yes"
+		forceRefreshOff = true
+	}
+
+	if configPath != "" {
+		// Attempt to bootstrap the storage provider from the config file
+		return initializeServerFromConfig(configPath, storageProviderOptions, forceRefreshOff)
+	}
+
+	storageProviderName, err := cmd.Flags().GetString(consts.StorageProviderNameFlagStr)
+	if err != nil {
+		return fmt.Errorf("error parsing flag --%s, %s", consts.StorageProviderNameFlagStr, err)
+	}
+	storageProviderName = strings.ToLower(storageProviderName)
+
+	rootDir, _ := cmd.Flags().GetString(consts.RootDirFlagStr)
+	// We can skip the err because an error should only happen if the cmd does not have a root-dir flag,
+	// so unless a config has been specified, assume the default root dir
+	// The only command that calls this function and does not have a root-dir flag is refresh, and if the user wants to refresh an index
+	// that does not live in the default root dir, they should be passing a config file
+	// If there was an error, rootDir will still be empty
 	if rootDir == "" {
-		return getDefaultRootDir()
-	} else {
-		return rootDir, nil
+		// Try to get the root dir from the environment
+		rootDirEnv, rootDirEnvSet := os.LookupEnv(consts.RootDirEnvVar)
+		if rootDirEnvSet {
+			rootDir = rootDirEnv
+		} else {
+			rootDir, err = getDefaultLocalRootDir()
+			if err != nil {
+				return err
+			}
+		}
 	}
+
+	// Make sure the root directory, if supplied, makes sense for the storage provider requested, if supplied
+	err = checkRootDirProviderConsistency(rootDir, storageProviderName)
+	if err != nil {
+		return err
+	}
+
+	// We may be able to derive the root dir from the provided storage options, so check that first
+	rootDir, storageOptions, err := parseStorageProviderOptions(rootDir, storageProviderName, storageProviderOptions)
+	if err != nil {
+		return err
+	}
+
+	// Refreshing is enabled unless there has been an option supplied to turn it off
+	autoRefreshEnabled := true
+	refreshValue := storageProviderOptions[consts.DisableAutoRefreshOptionStr]
+	refreshValue = strings.ToLower(refreshValue)
+	if refreshValue == "yes" || refreshValue == "true" {
+		autoRefreshEnabled = false
+	}
+
+	// Determine what type of provider to set up based on the path passed in
+	// We need more than the scheme, so we will parse it here
+	parsedDirPath, err := url.Parse(rootDir)
+	if err != nil {
+		return fmt.Errorf("could not parse root directory path: %s", err)
+	}
+	switch parsedDirPath.Scheme {
+	case consts.AWSS3StorageProviderStr:
+		bucketDir := strings.TrimPrefix(parsedDirPath.Path, "/")
+		// See if we got a region from storage provider options
+		// We already got the root dir (bucket and directory) from the options or the root dir option
+		s3Options, ok := storageOptions.(storage.S3StorageOptions)
+		if !ok {
+			// Try to get the region from the environment
+			s3Options.Region, err = getS3BucketRegion(parsedDirPath.Host)
+			if err != nil {
+				return err
+			}
+			// The "host" is the bucket name
+			s3Options.BucketName = parsedDirPath.Host
+			s3Options.Directory = bucketDir
+		} else {
+			if s3Options.BucketName == "" {
+				s3Options.BucketName = parsedDirPath.Host
+			}
+			if s3Options.Region == "" {
+				s3Options.Region, err = getS3BucketRegion(s3Options.BucketName)
+				if err != nil {
+					return err
+				}
+			}
+		}
+		s3Options.AutoRefreshEnabled = autoRefreshEnabled
+
+		runningServerConfig.StorageProvider, err = createStorageProvider(consts.AWSS3StorageProviderStr, s3Options, false)
+		if err != nil {
+			return err
+		}
+	case "", "file":
+		localOptions, ok := storageOptions.(storage.LocalStorageOptions)
+		if !ok {
+			localOptions = storage.LocalStorageOptions{
+				BasePath: parsedDirPath.Path,
+			}
+		} else {
+			if localOptions.BasePath == "" {
+				localOptions.BasePath = parsedDirPath.Path
+			}
+		}
+		localOptions.AutoRefreshEnabled = autoRefreshEnabled
+		runningServerConfig.StorageProvider, err = createStorageProvider(consts.LocalStorageProviderStr, localOptions, false)
+		if err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("%s is not a supported storage provider", parsedDirPath.Scheme)
+	}
+
+	// Read the config from the root dir
+	configuredPaths, err := runningServerConfig.StorageProvider.Paths()
+	if err != nil {
+		return ErrServerNotInitialized
+	}
+	configData, err := runningServerConfig.StorageProvider.ReadConfig()
+	if err != nil {
+		if errors.Is(err, storage.ErrDoesNotExist) {
+			fmt.Printf(Warn+"Config file %s does not exist\n", configuredPaths.Config)
+		} else {
+			fmt.Printf("Error reading config file %s, %s\n", configuredPaths.Config, err)
+		}
+		// Could not read a config file from the storage provider for whatever reason, so we will use defaults and let CLI args override
+		fmt.Println("Using default configuration and allowing command arguments to override")
+	} else {
+		err = json.Unmarshal(configData, runningServerConfig)
+		if err != nil {
+			// Something was wrong with the config file, the user will have to fix it or re-run setup
+			return fmt.Errorf("error parsing config file %s, %s", configuredPaths.Config, err)
+		}
+		if runningServerConfig.SigningKeyProviderName == consts.SigningKeyProviderExternal {
+			// Turn off auto refresh because we cannot sign the index
+			err = runningServerConfig.StorageProvider.StopAutoRefresh(true)
+			if err != nil {
+				return fmt.Errorf("needed to stop auto refresh but encountered an error: %s", err)
+			}
+		}
+	}
+	runningServerConfig.RootDir = runningServerConfig.StorageProvider.BasePath()
+	runningServerConfig.StorageProviderName = runningServerConfig.StorageProvider.Name()
+	runningServerConfig.StorageProviderDetails = runningServerConfig.StorageProvider.Options()
+	return nil
 }
