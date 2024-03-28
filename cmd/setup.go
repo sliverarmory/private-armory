@@ -98,7 +98,7 @@ var genSignatureCmd = &cobra.Command{
 			fmt.Printf("%serror parsing flag %s, %s\n", Warn, consts.FileFlagStr, err)
 			return
 		}
-		fmt.Println("\n" + Info + "Package signing key successfully generated:")
+		fmt.Println(Info + "Package signing key successfully generated:")
 		fmt.Printf("Public key:\n%s\n\n", public)
 		fmt.Printf("Private key:\n%s\n\n", string(encryptedPrivateKey))
 
