@@ -85,12 +85,12 @@ var genSignatureCmd = &cobra.Command{
 
 		public, private, err := minisign.GenerateKey(rand.Reader)
 		if err != nil {
-			fmt.Printf(Warn+"failed to generate public/private key(s): %s", err)
+			fmt.Printf(Warn+"Failed to generate public/private key(s): %s", err)
 			return
 		}
 		encryptedPrivateKey, err := minisign.EncryptKey(password, private)
 		if err != nil {
-			fmt.Printf(Warn+"failed to generate public/private key(s): %s", err)
+			fmt.Printf(Warn+"Failed to generate public/private key(s): %s", err)
 			return
 		}
 		fileName, err := cmd.Flags().GetString(consts.FileFlagStr)
@@ -106,16 +106,16 @@ var genSignatureCmd = &cobra.Command{
 			pubKeyName := getPublicKeyFileName(fileName)
 			err = os.WriteFile(fileName, encryptedPrivateKey, 0600)
 			if err != nil {
-				fmt.Printf("%scould not write private key to %s: %s\n", Warn, fileName, err)
+				fmt.Printf("%sCould not write private key to %s: %s\n", Warn, fileName, err)
 				return
 			}
 			err = os.WriteFile(pubKeyName, []byte(public.String()), 0666)
 			if err != nil {
-				fmt.Printf("%swrote private key to %s\n", Info, fileName)
-				fmt.Printf("%scould not write public key to %s: %s\n", Warn, pubKeyName, err)
+				fmt.Printf("%sWrote private key to %s\n", Info, fileName)
+				fmt.Printf("%sCould not write public key to %s: %s\n", Warn, pubKeyName, err)
 				return
 			}
-			fmt.Printf("%swrote key to %s (private), %s (public)\n", Info, fileName, pubKeyName)
+			fmt.Printf("%sWrote key to %s (private), %s (public)\n", Info, fileName, pubKeyName)
 		}
 	},
 }
