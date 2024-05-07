@@ -36,11 +36,23 @@ armory-server:
 .PHONY: release
 release:
 	mkdir -p ./release
+	CGO_ENABLED=0 GOOS=linux GOARCH=386 $(GO) build -o ./release/armory-server_linux-386 -trimpath -ldflags $(LDFLAGS) .
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -o ./release/armory-server_linux-amd64 -trimpath -ldflags $(LDFLAGS) .
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -o ./release/armory-server_linux-arm64 -trimpath -ldflags $(LDFLAGS) .
+
 	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 $(GO) build -o ./release/armory-server_macos-amd64 -trimpath -ldflags $(LDFLAGS) .
 	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 $(GO) build -o ./release/armory-server_macos-arm64 -trimpath -ldflags $(LDFLAGS) .
-	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build -o ./release/armory-server_windows.exe -trimpath -ldflags $(LDFLAGS) .
+
+	CGO_ENABLED=0 GOOS=windows GOARCH=386 $(GO) build -o ./release/armory-server_windows-386.exe -trimpath -ldflags $(LDFLAGS) .
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build -o ./release/armory-server_windows-amd64.exe -trimpath -ldflags $(LDFLAGS) .
+	CGO_ENABLED=0 GOOS=windows GOARCH=arm64 $(GO) build -o ./release/armory-server_windows-arm64.exe -trimpath -ldflags $(LDFLAGS) .
+
+	CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 $(GO) build -o ./release/armory-server_freebsd-amd64 -trimpath -ldflags $(LDFLAGS) .
+	CGO_ENABLED=0 GOOS=freebsd GOARCH=arm64 $(GO) build -o ./release/armory-server_freebsd-arm64 -trimpath -ldflags $(LDFLAGS) .
+	CGO_ENABLED=0 GOOS=openbsd GOARCH=amd64 $(GO) build -o ./release/armory-server_openbsd-amd64.exe -trimpath -ldflags $(LDFLAGS) .
+	CGO_ENABLED=0 GOOS=openbsd GOARCH=arm64 $(GO) build -o ./release/armory-server_openbsd-arm64.exe -trimpath -ldflags $(LDFLAGS) .
+	CGO_ENABLED=0 GOOS=netbsd GOARCH=amd64 $(GO) build -o ./release/armory-server_netbsd-amd64.exe -trimpath -ldflags $(LDFLAGS) .
+	CGO_ENABLED=0 GOOS=netbsd GOARCH=arm64 $(GO) build -o ./release/armory-server_netbsd-arm64.exe -trimpath -ldflags $(LDFLAGS) .
 
 clean:
 	rm -f ./armory-server
