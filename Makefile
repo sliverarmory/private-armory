@@ -49,10 +49,10 @@ release:
 
 	CGO_ENABLED=$(CGO_ENABLED) GOOS=freebsd GOARCH=amd64 $(GO) build -o ./release/armory-server_freebsd-amd64 -trimpath -ldflags $(LDFLAGS) .
 	CGO_ENABLED=$(CGO_ENABLED) GOOS=freebsd GOARCH=arm64 $(GO) build -o ./release/armory-server_freebsd-arm64 -trimpath -ldflags $(LDFLAGS) .
-	CGO_ENABLED=$(CGO_ENABLED) GOOS=openbsd GOARCH=amd64 $(GO) build -o ./release/armory-server_openbsd-amd64.exe -trimpath -ldflags $(LDFLAGS) .
-	CGO_ENABLED=$(CGO_ENABLED) GOOS=openbsd GOARCH=arm64 $(GO) build -o ./release/armory-server_openbsd-arm64.exe -trimpath -ldflags $(LDFLAGS) .
-	CGO_ENABLED=$(CGO_ENABLED) GOOS=netbsd GOARCH=amd64 $(GO) build -o ./release/armory-server_netbsd-amd64.exe -trimpath -ldflags $(LDFLAGS) .
-	CGO_ENABLED=$(CGO_ENABLED) GOOS=netbsd GOARCH=arm64 $(GO) build -o ./release/armory-server_netbsd-arm64.exe -trimpath -ldflags $(LDFLAGS) .
+	CGO_ENABLED=$(CGO_ENABLED) GOOS=openbsd GOARCH=amd64 $(GO) build -o ./release/armory-server_openbsd-amd64 -trimpath -ldflags $(LDFLAGS) .
+	CGO_ENABLED=$(CGO_ENABLED) GOOS=openbsd GOARCH=arm64 $(GO) build -o ./release/armory-server_openbsd-arm64 -trimpath -ldflags $(LDFLAGS) .
+	CGO_ENABLED=$(CGO_ENABLED) GOOS=netbsd GOARCH=amd64 $(GO) build -o ./release/armory-server_netbsd-amd64 -trimpath -ldflags $(LDFLAGS) .
+	CGO_ENABLED=$(CGO_ENABLED) GOOS=netbsd GOARCH=arm64 $(GO) build -o ./release/armory-server_netbsd-arm64 -trimpath -ldflags $(LDFLAGS) .
 
 clean:
 	rm -f ./armory-server
