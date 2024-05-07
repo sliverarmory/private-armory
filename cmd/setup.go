@@ -34,8 +34,8 @@ import (
 
 	"aead.dev/minisign"
 	"github.com/AlecAivazis/survey/v2"
-	"github.com/sliverarmory/external-armory/api/storage"
-	"github.com/sliverarmory/external-armory/consts"
+	"github.com/sliverarmory/private-armory/api/storage"
+	"github.com/sliverarmory/private-armory/consts"
 	"github.com/spf13/cobra"
 )
 

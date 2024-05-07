@@ -30,7 +30,7 @@ import (
 	"aead.dev/minisign"
 	"github.com/hashicorp/vault-client-go"
 	"github.com/hashicorp/vault-client-go/schema"
-	"github.com/sliverarmory/external-armory/consts"
+	"github.com/sliverarmory/private-armory/consts"
 )
 
 type VaultSigningProvider struct {

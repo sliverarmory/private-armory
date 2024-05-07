@@ -25,8 +25,8 @@ import (
 	"strings"
 
 	"github.com/AlecAivazis/survey/v2"
-	"github.com/sliverarmory/external-armory/api/signing"
-	"github.com/sliverarmory/external-armory/consts"
+	"github.com/sliverarmory/private-armory/api/signing"
+	"github.com/sliverarmory/private-armory/consts"
 )
 
 /*

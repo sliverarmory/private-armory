@@ -27,8 +27,8 @@ import (
 	"os"
 
 	"aead.dev/minisign"
-	"github.com/sliverarmory/external-armory/api/storage"
-	"github.com/sliverarmory/external-armory/consts"
+	"github.com/sliverarmory/private-armory/api/storage"
+	"github.com/sliverarmory/private-armory/consts"
 )
 
 const (

@@ -29,10 +29,10 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"github.com/sliverarmory/external-armory/api"
-	"github.com/sliverarmory/external-armory/api/storage"
-	"github.com/sliverarmory/external-armory/consts"
-	"github.com/sliverarmory/external-armory/log"
+	"github.com/sliverarmory/private-armory/api"
+	"github.com/sliverarmory/private-armory/api/storage"
+	"github.com/sliverarmory/private-armory/consts"
+	"github.com/sliverarmory/private-armory/log"
 	"github.com/spf13/cobra"
 )
 

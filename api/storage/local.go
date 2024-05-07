@@ -28,9 +28,9 @@ import (
 	"strings"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/sliverarmory/external-armory/api/patterns"
-	"github.com/sliverarmory/external-armory/consts"
-	"github.com/sliverarmory/external-armory/util"
+	"github.com/sliverarmory/private-armory/api/patterns"
+	"github.com/sliverarmory/private-armory/consts"
+	"github.com/sliverarmory/private-armory/util"
 )
 
 const (

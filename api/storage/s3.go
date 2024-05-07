@@ -35,10 +35,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
-	"github.com/sliverarmory/external-armory/api/patterns"
-	"github.com/sliverarmory/external-armory/api/watcher"
-	"github.com/sliverarmory/external-armory/consts"
-	"github.com/sliverarmory/external-armory/util"
+	"github.com/sliverarmory/private-armory/api/patterns"
+	"github.com/sliverarmory/private-armory/api/watcher"
+	"github.com/sliverarmory/private-armory/consts"
+	"github.com/sliverarmory/private-armory/util"
 )
 
 type S3StorageProvider struct {

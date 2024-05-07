@@ -18,7 +18,7 @@ package main
 	along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-import "github.com/sliverarmory/external-armory/cmd"
+import "github.com/sliverarmory/private-armory/cmd"
 
 func main() {
 	cmd.Execute()

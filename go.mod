@@ -1,4 +1,4 @@
-module github.com/sliverarmory/external-armory
+module github.com/sliverarmory/private-armory
 
 go 1.21
 

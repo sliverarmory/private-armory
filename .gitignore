@@ -2,3 +2,5 @@ external-armory
 .vscode/
 armory-data/
 /release
+/armory-server
+*.exe

@@ -28,10 +28,10 @@ import (
 
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/sirupsen/logrus"
-	"github.com/sliverarmory/external-armory/api/patterns"
-	"github.com/sliverarmory/external-armory/consts"
-	"github.com/sliverarmory/external-armory/log"
-	"github.com/sliverarmory/external-armory/util"
+	"github.com/sliverarmory/private-armory/api/patterns"
+	"github.com/sliverarmory/private-armory/consts"
+	"github.com/sliverarmory/private-armory/log"
+	"github.com/sliverarmory/private-armory/util"
 	"github.com/spf13/cobra"
 )
 

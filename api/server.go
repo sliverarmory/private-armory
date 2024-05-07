@@ -36,10 +36,10 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
-	"github.com/sliverarmory/external-armory/api/signing"
-	"github.com/sliverarmory/external-armory/api/storage"
-	"github.com/sliverarmory/external-armory/consts"
-	"github.com/sliverarmory/external-armory/util"
+	"github.com/sliverarmory/private-armory/api/signing"
+	"github.com/sliverarmory/private-armory/api/storage"
+	"github.com/sliverarmory/private-armory/consts"
+	"github.com/sliverarmory/private-armory/util"
 )
 
 var StatusOKResponse = []byte(`{"status": "ok"}`)
