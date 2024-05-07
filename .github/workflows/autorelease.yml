@@ -3,32 +3,29 @@ name: Release
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+"]
-    branches: [master]
+    branches: [main]
 
 jobs:
-
   tagged-release:
-
     name: "Tagged Release"
     if: startsWith( github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
     steps:
-  
-    - name: Go 1.18
-      uses: actions/setup-go@v2
-      with:
-        go-version: '^1.18'
-    
-    - name: Make
-      run: |
-        make release
+      - name: Go 1.22
+        uses: actions/setup-go@v2
+        with:
+          go-version: "^1.22"
 
-    - name: "Publish Release"
-      uses: "marvinpinto/action-automatic-releases@latest"
-      with:
-        repo_token: "${{ secrets.GITHUB_TOKEN }}"
-        prerelease: true
-        files: |
-          ./release/*
+      - name: Make
+        run: |
+          make release
+
+      - name: "Publish Release"
+        uses: "marvinpinto/action-automatic-releases@latest"
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          prerelease: true
+          files: |
+            ./release/*
