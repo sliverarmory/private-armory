@@ -1,6 +1,7 @@
 module github.com/sliverarmory/private-armory
 
-go 1.21
+go 1.23.0
+
 toolchain go1.24.1
 
 require (
@@ -15,7 +16,7 @@ require (
 	github.com/fsnotify/fsnotify v1.7.0
 	github.com/gorilla/mux v1.8.0
 	github.com/hashicorp/vault-client-go v0.4.3
-	github.com/sirupsen/logrus v1.8.1
+	github.com/sirupsen/logrus v1.8.3
 	github.com/spf13/cobra v1.4.0
 )
 
